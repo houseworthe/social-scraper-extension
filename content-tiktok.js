@@ -329,10 +329,10 @@
 
       const data = await scrapePost();
       const sent = await sendToServer(data);
-      const count = await saveLocal(data);
+      await saveLocal(data);
 
-      btn.style.background = sent ? '#2ecc71' : '#f39c12';
-      btn.textContent = sent ? '✓ Sent to LabelDex!' : '✓ Saved locally';
+      btn.style.background = '#2ecc71';
+      btn.textContent = '✓ Scraped!';
       setTimeout(() => {
         btn.style.background = '#fe2c55';
         btn.textContent = '📋 Scrape Post';
