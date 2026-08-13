@@ -1,7 +1,7 @@
 // popup.js — Social Scraper popup v2
 // Shows scrape queue from Label-Dex, local scrapes, settings for API token
 
-const API_BASE = 'https://label-dex.com';
+const API_BASE = 'https://staging.label-dex.com';
 
 let activeTab = 'queue';
 let queueData = [];

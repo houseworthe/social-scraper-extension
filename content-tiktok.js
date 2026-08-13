@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  const API_BASE = 'https://label-dex.com';
+  const API_BASE = 'https://staging.label-dex.com';
   let scraped = [];
 
   function getCurrentTrackId() {
