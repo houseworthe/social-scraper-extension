@@ -77,24 +77,33 @@
 
   function extractComments() {
     const comments = [];
+    // Strategy 1: Standard comment selectors
     const selectors = [
-      'ul div[role="listitem"]',
+      'ul div[role="listitem"] span[dir="auto"]',
       '[data-testid="post-comment"]',
       'article ul li span[dir="auto"]',
+      'article ul li div[class*="comment"] span[dir="auto"]',
+      // IG Reels comment layout
+      'div[class*="comment"] span[dir="auto"]',
+      // Fallback: any visible comment-like text blocks
+      'article ul li a[href*="/"] + span',
     ];
     for (const sel of selectors) {
       const els = document.querySelectorAll(sel);
       if (els.length > 0) {
         els.forEach((el, i) => {
           const text = el.textContent.trim();
-          if (text && text.length > 2 && i < 30) {
-            const parent = el.closest('li, [role="listitem"]');
+          if (text && text.length > 2 && text.length < 500 && i < 30) {
+            const parent = el.closest('li, [role="listitem"], div[class*="comment"]');
             let username = '';
             if (parent) {
-              const userEl = parent.querySelector('a[href*="/"] span, a[role="link"]');
+              const userEl = parent.querySelector('a[href*="/"] span, a[role="link"], a[href*="/"]');
               if (userEl) username = userEl.textContent.trim();
             }
-            comments.push(username ? `${username}: ${text}` : text);
+            // Avoid duplicating the caption as a comment
+            if (text.length > 2) {
+              comments.push(username ? `${username}: ${text}` : text);
+            }
           }
         });
         if (comments.length) break;
