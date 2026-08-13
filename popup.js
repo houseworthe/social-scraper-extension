@@ -104,6 +104,13 @@ function renderQueue() {
       chrome.storage.local.set({ activeTrackId: trackId }, () => {
         chrome.tabs.create({ url });
       });
+
+      // Optimistically mark scraped so it drops out of the queue right away;
+      // the next server refetch will confirm (or correct) it.
+      const track = queueData.find(t => (t.trackId || '') === trackId);
+      const link = track?.promoLinks?.find(l => l.url === url);
+      if (link) link.scraped = true;
+      render();
     };
   });
 }

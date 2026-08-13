@@ -20,14 +20,15 @@
 
     const payload = { ...data, trackId };
     try {
-      const resp = await fetch(`${API_BASE}/api/social-proof/submit`, {
+      const resp = await fetch(`${API_BASE}/api/social-proof/submit?token=${encodeURIComponent(token)}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      if (!resp.ok) {
+        console.log('[Social Scraper] Submit failed:', resp.status, await resp.text());
+        return false;
+      }
       const json = await resp.json();
       return json.ok === true;
     } catch (e) {
@@ -37,8 +38,13 @@
   }
 
   function saveLocal(data) {
-    scraped.push(data);
-    chrome.storage.local.set({ localScrapes: scraped });
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['localScrapes'], (res) => {
+        scraped = res.localScrapes || [];
+        scraped.push(data);
+        chrome.storage.local.set({ localScrapes: scraped }, () => resolve(scraped.length));
+      });
+    });
   }
 
   function parseCount(text) {
@@ -156,6 +162,12 @@
       },
     ]);
 
+    // Reels often only expose counts via IG's alt-text blob:
+    // "215 likes, 22 comments - user on August 11, 2026: "actual caption""
+    const altBlob = document.querySelector('meta[property="og:description"]')?.content
+      || document.querySelector('h1')?.textContent
+      || '';
+
     // ===== CAPTION =====
     data.caption = findAnyStrategies([
       () => {
@@ -172,13 +184,15 @@
       () => {
         // meta description (usually contains caption text)
         const meta = document.querySelector('meta[property="og:description"]');
-        if (meta) {
-          // Strip "X likes, Y comments" suffix
-          return meta.content.replace(/\d+.*?(likes|comments).*$/i, '').trim().slice(0, 2000) || null;
-        }
-        return null;
+        return meta ? meta.content.trim().slice(0, 2000) || null : null;
       },
     ]);
+    if (data.caption) {
+      // IG alt-text format: '215 likes, 22 comments - user on date: "actual caption".'
+      // Strip the leading count/date prefix and the wrapping quotes + trailing period.
+      const m = data.caption.match(/^[\d,.]+\s*(?:likes?|comments?)[\s\S]*?:\s*"([\s\S]*)"\.?\s*$/i);
+      if (m) data.caption = m[1].trim();
+    }
 
     // ===== LIKES =====
     data.likes = findAnyStrategies([
@@ -204,6 +218,11 @@
         const m = text.match(/([\d,.]+\s*[km]?)\s*likes?/i);
         if (m && !m[1].includes('\n')) return parseCount(m[1]);
         return null;
+      },
+      () => {
+        // Fallback: alt-text blob (Reels), "215 likes"
+        const m = altBlob.match(/([\d,.]+\s*[km]?)\s*likes?/i);
+        return m ? parseCount(m[1]) : null;
       },
     ]);
 
@@ -303,7 +322,7 @@
 
       // Send to Firestore via API
       const sent = await sendToServer(data);
-      saveLocal(data);
+      const count = await saveLocal(data);
 
       btn.style.background = sent ? '#2ecc71' : '#f39c12';
       btn.textContent = sent ? '✓ Sent to LabelDex!' : '✓ Saved locally';
@@ -313,7 +332,7 @@
         btn.disabled = false;
       }, 2000);
 
-      chrome.runtime.sendMessage({ type: 'SCRAPED', count: scraped.length });
+      chrome.runtime.sendMessage({ type: 'SCRAPED', count });
     };
 
     document.body.appendChild(btn);

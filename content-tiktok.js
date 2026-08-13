@@ -19,14 +19,15 @@
 
     const payload = { ...data, trackId };
     try {
-      const resp = await fetch(`${API_BASE}/api/social-proof/submit`, {
+      const resp = await fetch(`${API_BASE}/api/social-proof/submit?token=${encodeURIComponent(token)}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      if (!resp.ok) {
+        console.log('[Social Scraper] Submit failed:', resp.status, await resp.text());
+        return false;
+      }
       const json = await resp.json();
       return json.ok === true;
     } catch (e) {
@@ -36,8 +37,13 @@
   }
 
   function saveLocal(data) {
-    scraped.push(data);
-    chrome.storage.local.set({ localScrapes: scraped });
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['localScrapes'], (res) => {
+        scraped = res.localScrapes || [];
+        scraped.push(data);
+        chrome.storage.local.set({ localScrapes: scraped }, () => resolve(scraped.length));
+      });
+    });
   }
 
   function parseCount(text) {
@@ -320,7 +326,7 @@
 
       const data = await scrapePost();
       const sent = await sendToServer(data);
-      saveLocal(data);
+      const count = await saveLocal(data);
 
       btn.style.background = sent ? '#2ecc71' : '#f39c12';
       btn.textContent = sent ? '✓ Sent to LabelDex!' : '✓ Saved locally';
@@ -330,7 +336,7 @@
         btn.disabled = false;
       }, 2000);
 
-      chrome.runtime.sendMessage({ type: 'SCRAPED', count: scraped.length });
+      chrome.runtime.sendMessage({ type: 'SCRAPED', count });
     };
 
     document.body.appendChild(btn);
