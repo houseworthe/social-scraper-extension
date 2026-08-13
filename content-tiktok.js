@@ -19,9 +19,12 @@
 
     const payload = { ...data, trackId };
     try {
-      const resp = await fetch(`${API_BASE}/api/social-proof/submit?token=${encodeURIComponent(token)}`, {
+      const resp = await fetch(`${API_BASE}/api/social-proof/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
