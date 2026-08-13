@@ -1,116 +1,289 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
-      width: 400px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f1419;
+      width: 380px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a1a3a;
       color: #e7e9ea;
     }
+
+    /* ── Header with LabelDex gradient ── */
     .header {
-      padding: 14px 20px;
-      background: linear-gradient(135deg, #0095f6, #fe2c55);
+      padding: 16px 20px 12px;
+      background: linear-gradient(135deg, rgba(100,120,160,0.25) 0%, #0b1220 45%, #0a1a3a 100%);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
     }
-    .header h1 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
-    .tabs { display: flex; gap: 4px; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .brand-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #0095f6;
+      box-shadow: 0 0 10px rgba(0,149,246,0.6);
+    }
+    .brand-name {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #fff;
+    }
+    .brand-suffix {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.4);
+      margin-left: 2px;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 2px;
+    }
     .tab {
-      padding: 5px 12px;
-      border-radius: 6px;
+      padding: 6px 14px;
+      border-radius: 8px;
       cursor: pointer;
       font-size: 12px;
       font-weight: 600;
-      color: rgba(255,255,255,0.6);
-      background: rgba(255,255,255,0.1);
-      transition: all 0.2s;
+      color: rgba(255,255,255,0.45);
+      transition: all 0.15s;
+      border: 1px solid transparent;
     }
-    .tab.active { color: white; background: rgba(255,255,255,0.25); }
-    .tab:hover { background: rgba(255,255,255,0.2); }
-    .tab-panel { display: none; padding: 12px 16px 16px; }
+    .tab.active {
+      color: #fff;
+      background: rgba(0,149,246,0.12);
+      border-color: rgba(0,149,246,0.25);
+    }
+    .tab:hover:not(.active) {
+      color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.04);
+    }
+    .tab .count {
+      font-size: 10px;
+      opacity: 0.6;
+      margin-left: 2px;
+    }
+
+    /* ── Panels ── */
+    .tab-panel { display: none; padding: 12px 14px 16px; }
     .tab-panel.active-panel { display: block; }
 
-    .actions { display: flex; gap: 6px; margin-bottom: 10px; }
+    /* ── Hint bar ── */
+    .hint {
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.2);
+      font-size: 11px;
+      color: rgba(255,255,255,0.35);
+      line-height: 1.5;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    /* ── Action buttons ── */
+    .actions { display: flex; gap: 6px; margin-bottom: 12px; }
     .btn {
-      flex: 1; padding: 7px; border: none; border-radius: 6px;
-      font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;
+      flex: 1; padding: 8px; border: none; border-radius: 8px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: all 0.15s;
     }
-    .btn:hover { opacity: 0.85; }
-    .btn-export { background: #0095f6; color: white; }
-    .btn-clear { background: #2f3336; color: #e7e9ea; }
+    .btn-export {
+      background: #0095f6; color: #fff;
+      box-shadow: 0 0 16px -6px rgba(0,149,246,0.5);
+    }
+    .btn-export:hover { background: #1877f2; }
+    .btn-clear {
+      background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .btn-clear:hover { background: rgba(255,255,255,0.1); }
 
-    .data-list { max-height: 350px; overflow-y: auto; }
-    .data-item {
-      padding: 8px 0; border-bottom: 1px solid #1d2024; font-size: 12px;
+    /* ── Queue track cards ── */
+    .track-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 8px;
     }
-    .platform {
-      display: inline-block; padding: 1px 7px; border-radius: 4px;
-      font-size: 10px; font-weight: 700; text-transform: uppercase; margin-right: 5px;
+    .track-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
     }
-    .platform-Instagram { background: rgba(0,149,246,0.2); color: #0095f6; }
-    .platform-TikTok { background: rgba(254,44,85,0.2); color: #fe2c55; }
-    .caption { color: #71767b; margin-top: 3px; }
-    .stats { color: #71767b; margin-top: 3px; font-size: 11px; }
+    .track-card-icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgba(0,149,246,0.2), rgba(59,130,246,0.1));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; color: #0095f6;
+      flex-shrink: 0;
+    }
+    .track-card-info { flex: 1; min-width: 0; }
+    .track-card-title {
+      font-size: 13px; font-weight: 600; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .track-card-artist {
+      font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 1px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .track-badge {
+      font-size: 10px; font-weight: 700;
+      padding: 2px 8px; border-radius: 6px;
+      background: rgba(0,149,246,0.15); color: #3b9eff;
+    }
 
-    .track-group { margin-bottom: 12px; }
-    .track-title { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
-    .track-title .artist { color: #71767b; font-weight: 400; }
-    .queue-item {
-      display: flex; align-items: center; gap: 6px;
-      padding: 6px 8px; border-radius: 6px; font-size: 11px;
-      background: #1d2024; margin-bottom: 3px;
+    /* ── Link rows inside track cards ── */
+    .link-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      transition: background 0.15s;
     }
-    .status-badge {
-      padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase;
-    }
-    .status-pending { background: rgba(251,196,0,0.2); color: #fbc400; }
-    .status-scraped { background: rgba(46,204,113,0.2); color: #2ecc71; }
-    .queue-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #71767b; }
-    .go-btn {
-      padding: 3px 10px; border: none; border-radius: 4px;
-      background: #0095f6; color: white; font-size: 11px; font-weight: 600; cursor: pointer;
-    }
-    .go-btn:hover { background: #1877f2; }
+    .link-row:hover { background: rgba(255,255,255,0.03); }
+    .link-row--done { opacity: 0.5; }
 
-    .empty { text-align: center; padding: 30px 16px; color: #71767b; font-size: 12px; }
+    .link-platform {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+      min-width: 28px;
+      text-align: center;
+    }
+    .platform-IG { background: rgba(0,149,246,0.18); color: #3b9eff; }
+    .platform-TT { background: rgba(254,44,85,0.18); color: #fe2c55; }
+    .platform-Instagram { background: rgba(0,149,246,0.18); color: #3b9eff; }
+    .platform-TikTok { background: rgba(254,44,85,0.18); color: #fe2c55; }
+    .platform-LINK { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.5); }
 
-    .settings-field { margin-bottom: 12px; }
-    .settings-field label { display: block; font-size: 11px; font-weight: 600; color: #71767b; margin-bottom: 4px; }
+    .link-url {
+      flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: rgba(255,255,255,0.4);
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 10px;
+    }
+    .link-status { font-size: 12px; }
+    .link-status--done { color: #2ecc71; }
+
+    .link-go {
+      padding: 3px 10px;
+      border: none; border-radius: 6px;
+      background: #0095f6; color: #fff;
+      font-size: 10px; font-weight: 600; cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .link-go:hover { background: #1877f2; }
+
+    /* ── Scrape cards (local tab) ── */
+    .scrape-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+    }
+    .scrape-top {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 4px;
+    }
+    .scrape-user {
+      font-size: 12px; font-weight: 600; color: #fff;
+    }
+    .scrape-caption {
+      font-size: 11px; color: rgba(255,255,255,0.45);
+      line-height: 1.4; margin-bottom: 3px;
+    }
+    .scrape-stats {
+      font-size: 10px; color: rgba(255,255,255,0.3);
+    }
+
+    /* ── Data list container ── */
+    .data-list { max-height: 400px; overflow-y: auto; }
+    .data-list::-webkit-scrollbar { width: 4px; }
+    .data-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 40px 16px;
+      color: rgba(255,255,255,0.3);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* ── Settings ── */
+    .settings-wrap { padding: 4px 0; }
+    .settings-field { margin-bottom: 14px; }
+    .settings-field label {
+      display: block; font-size: 11px; font-weight: 600;
+      color: rgba(255,255,255,0.4); margin-bottom: 6px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
     .settings-field input {
-      width: 100%; padding: 7px 10px; border: 1px solid #2f3336; border-radius: 6px;
-      background: #0f1419; color: #e7e9ea; font-size: 12px; font-family: monospace;
+      width: 100%; padding: 9px 12px;
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+      background: rgba(0,0,0,0.25); color: #fff;
+      font-size: 12px; font-family: ui-monospace, "SF Mono", monospace;
+      outline: none; transition: border-color 0.15s;
+    }
+    .settings-field input:focus {
+      border-color: rgba(0,149,246,0.5);
     }
     .save-btn {
-      padding: 7px 16px; border: none; border-radius: 6px;
-      background: #0095f6; color: white; font-size: 12px; font-weight: 600; cursor: pointer;
+      padding: 9px 20px; border: none; border-radius: 8px;
+      background: #0095f6; color: #fff;
+      font-size: 12px; font-weight: 700; cursor: pointer;
+      box-shadow: 0 0 16px -6px rgba(0,149,246,0.5);
+      transition: background 0.15s;
     }
     .save-btn:hover { background: #1877f2; }
-
-    .instructions {
-      padding: 10px 16px; background: #1d2024; font-size: 11px;
-      color: #71767b; line-height: 1.5; border-bottom: 1px solid #2f3336;
+    .save-btn.btn-saved { background: #2ecc71; box-shadow: none; }
+    .settings-hint {
+      margin-top: 14px; font-size: 11px;
+      color: rgba(255,255,255,0.3); line-height: 1.5;
     }
   </style>
 </head>
 <body>
+  <!-- Header -->
   <div class="header">
-    <h1>📋 Social Scraper</h1>
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <span class="brand-name">LabelDex</span>
+      <span class="brand-suffix">Scraper</span>
+    </div>
     <div class="tabs">
-      <div class="tab active" data-tab="queue">Queue (<span id="queueCount">0</span>)</div>
-      <div class="tab" data-tab="local">Local (<span id="localCount">0</span>)</div>
+      <div class="tab active" data-tab="queue">Queue <span class="count" id="queueCount">0</span></div>
+      <div class="tab" data-tab="local">Local <span class="count" id="localCount">0</span></div>
       <div class="tab" data-tab="settings">Settings</div>
     </div>
   </div>
 
-  <div class="instructions">
-    Click a link from the queue, hit "Scrape Post" on the page, data goes straight to Label-Dex.
+  <div class="hint">
+    Open a link from the queue → click "Scrape Post" on the page → data syncs to LabelDex.
   </div>
 
   <!-- Queue Tab -->
   <div class="tab-panel active-panel" id="queuePanel">
     <div class="data-list" id="queueList">
-      <div class="empty">Loading queue...</div>
+      <div class="empty">Loading queue…</div>
     </div>
   </div>
 
@@ -127,14 +300,14 @@
 
   <!-- Settings Tab -->
   <div class="tab-panel" id="settingsPanel">
-    <div style="padding: 4px 0;">
+    <div class="settings-wrap">
       <div class="settings-field">
-        <label>Label-Dex API Token</label>
+        <label>LabelDex API Token</label>
         <input type="password" id="token" placeholder="Enter your scraper token" />
       </div>
       <button class="save-btn" id="saveToken">Save Token</button>
-      <p style="margin-top: 12px; font-size: 11px; color: #71767b; line-height: 1.5;">
-        Get your token from the Label-Dex dashboard settings. This connects the extension to your Label-Dex account so scraped data flows into Firestore and shows up on the site live.
+      <p class="settings-hint">
+        Get your token from the LabelDex dashboard settings. This connects the extension so scraped data flows into your LabelDex account.
       </p>
     </div>
   </div>

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Social Scraper",
-  "version": "2.0.0",
-  "description": "Scrape engagement data from Instagram and TikTok, syncs directly to Label-Dex.",
+  "name": "LabelDex Scraper",
+  "version": "3.0.0",
+  "description": "Scrape engagement data from Instagram and TikTok for LabelDex track feedback.",
   "permissions": ["storage", "downloads", "clipboardWrite"],
   "host_permissions": [
     "https://www.instagram.com/*",

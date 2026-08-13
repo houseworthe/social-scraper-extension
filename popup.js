@@ -1,69 +1,105 @@
-// popup.js — Social Scraper popup v2
-// Shows scrape queue from Label-Dex, local scrapes, settings for API token
+// popup.js — LabelDex Scraper popup v3
+// Shows scrape queue from LabelDex, local scrapes, settings for API token
 
 const API_BASE = 'https://staging.label-dex.com';
 
 let activeTab = 'queue';
-let queueData = [];
+let queueData = []; // array of track objects (each has .promoLinks)
 let localScrapes = [];
 
 function load() {
   chrome.storage.local.get(['scraperToken', 'activeTrackId', 'localScrapes'], (res) => {
     document.getElementById('token').value = res.scraperToken || '';
     localScrapes = res.localScrapes || [];
-    render();
-    if (res.scraperToken) loadQueue(res.scraperToken);
+    if (res.scraperToken) {
+      loadQueue(res.scraperToken);
+    } else {
+      render();
+    }
   });
 }
 
 async function loadQueue(token) {
+  const listEl = document.getElementById('queueList');
+  listEl.innerHTML = '<div class="empty">Loading queue…</div>';
+
   try {
-    const resp = await fetch(`${API_BASE}/api/social-proof/queue?token=${encodeURIComponent(token)}`);
-    if (!resp.ok) throw new Error('Failed to load queue');
-    queueData = await resp.json();
+    const resp = await fetch(`${API_BASE}/api/social-proof/queue`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+
+    // API returns { success: true, tracks: [...] }
+    if (json && Array.isArray(json.tracks)) {
+      queueData = json.tracks;
+    } else if (Array.isArray(json)) {
+      // fallback: direct array
+      queueData = json;
+    } else {
+      console.error('[LabelDex] Unexpected queue response shape:', json);
+      queueData = [];
+    }
     render();
   } catch (e) {
-    document.getElementById('queueList').innerHTML = `<div class="empty">Failed to load queue. Check your token in Settings.</div>`;
+    console.error('[LabelDex] Queue load failed:', e);
+    listEl.innerHTML = '<div class="empty">Failed to load queue. Check your token in Settings.</div>';
+    document.getElementById('queueCount').textContent = '0';
   }
 }
 
 function render() {
-  // Update counts
-  document.getElementById('queueCount').textContent = `${queueData.length} tracks`;
-  document.getElementById('localCount').textContent = `${localScrapes.length} scraped`;
+  // Count total promo links across all tracks for the badge
+  const totalLinks = queueData.reduce((sum, t) => sum + (t.promoLinks?.length || 0), 0);
+  document.getElementById('queueCount').textContent = totalLinks;
+  document.getElementById('localCount').textContent = localScrapes.length;
 
-  // Render active tab
   if (activeTab === 'queue') renderQueue();
   else if (activeTab === 'local') renderLocal();
-  else if (activeTab === 'settings') renderSettings();
 }
 
 function renderQueue() {
   const el = document.getElementById('queueList');
+
   if (queueData.length === 0) {
-    el.innerHTML = '<div class="empty">No tracks with promo links yet. Producers can add promo links from their track vault.</div>';
+    el.innerHTML = '<div class="empty">No tracks in queue yet.</div>';
     return;
   }
 
   let html = '';
   for (const track of queueData) {
-    html += `<div class="track-group">
-      <div class="track-title">${escapeHtml(track.trackTitle)} — <span class="artist">${escapeHtml(track.artistName)}</span></div>`;
-    for (const link of track.promoLinks) {
-      const status = link.scraped ? 'scraped' : 'pending';
-      const statusClass = link.scraped ? 'status-scraped' : 'status-pending';
-      html += `<div class="queue-item ${statusClass}" data-url="${escapeHtml(link.url)}" data-track-id="${track.trackId}">
-        <span class="status-badge">${status}</span>
-        <span class="queue-url">${escapeHtml(link.url)}</span>
-        ${!link.scraped ? `<button class="go-btn" data-url="${escapeHtml(link.url)}" data-track-id="${track.trackId}">Go →</button>` : ''}
+    const links = track.promoLinks || [];
+    if (links.length === 0) continue;
+
+    html += `<div class="track-card">
+      <div class="track-card-header">
+        <div class="track-card-icon">♪</div>
+        <div class="track-card-info">
+          <div class="track-card-title">${escapeHtml(track.trackTitle || 'Untitled')}</div>
+          <div class="track-card-artist">${escapeHtml(track.artistName || 'Unknown artist')}</div>
+        </div>
+        <span class="track-badge">${links.length}</span>
+      </div>`;
+
+    for (const link of links) {
+      const scraped = link.scraped || link.status === 'scraped';
+      const platform = detectPlatform(link.url);
+      html += `<div class="link-row ${scraped ? 'link-row--done' : ''}">
+        <span class="link-platform platform-${platform}">${platform}</span>
+        <span class="link-url" title="${escapeAttr(link.url)}">${escapeHtml(shortenUrl(link.url))}</span>
+        ${scraped
+          ? '<span class="link-status link-status--done">✓</span>'
+          : `<button class="link-go" data-url="${escapeAttr(link.url)}" data-track-id="${escapeAttr(track.trackId || '')}">Open →</button>`
+        }
       </div>`;
     }
+
     html += '</div>';
   }
-  el.innerHTML = html;
+  el.innerHTML = html || '<div class="empty">No promo links in queue.</div>';
 
-  // Attach click handlers
-  el.querySelectorAll('.go-btn').forEach(btn => {
+  // Attach handlers
+  el.querySelectorAll('.link-go').forEach(btn => {
     btn.onclick = () => {
       const url = btn.dataset.url;
       const trackId = btn.dataset.trackId;
@@ -72,6 +108,22 @@ function renderQueue() {
       });
     };
   });
+}
+
+function detectPlatform(url) {
+  const u = (url || '').toLowerCase();
+  if (u.includes('instagram.com')) return 'IG';
+  if (u.includes('tiktok.com')) return 'TT';
+  return 'LINK';
+}
+
+function shortenUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.length > 25 ? parsed.pathname.slice(0, 23) + '…' : parsed.pathname;
+  } catch {
+    return url.length > 32 ? url.slice(0, 30) + '…' : url;
+  }
 }
 
 function renderLocal() {
@@ -84,30 +136,32 @@ function renderLocal() {
   const reversed = [...localScrapes].reverse();
   el.innerHTML = reversed.map((item) => {
     const platform = item.platform || 'Unknown';
-    const caption = item.caption ? item.caption.slice(0, 80) + (item.caption.length > 80 ? '...' : '') : '';
+    const caption = item.caption ? item.caption.slice(0, 80) + (item.caption.length > 80 ? '…' : '') : '';
     const stats = [
       item.likes != null ? `${item.likes.toLocaleString()} likes` : '',
       item.commentCount != null ? `${item.commentCount.toLocaleString()} comments` : '',
       item.views != null ? `${item.views.toLocaleString()} views` : '',
     ].filter(Boolean).join(' · ');
 
-    return `<div class="data-item">
-      <span class="platform platform-${platform}">${platform}</span>
-      ${item.username ? `<strong>@${escapeHtml(item.username)}</strong>` : ''}
-      ${caption ? `<div class="caption">${escapeHtml(caption)}</div>` : ''}
-      ${stats ? `<div class="stats">${stats}</div>` : ''}
+    return `<div class="scrape-card">
+      <div class="scrape-top">
+        <span class="link-platform platform-${platform === 'Instagram' ? 'IG' : platform === 'TikTok' ? 'TT' : 'LINK'}">${platform}</span>
+        ${item.username ? `<span class="scrape-user">@${escapeHtml(item.username)}</span>` : ''}
+      </div>
+      ${caption ? `<div class="scrape-caption">${escapeHtml(caption)}</div>` : ''}
+      ${stats ? `<div class="scrape-stats">${stats}</div>` : ''}
     </div>`;
   }).join('');
 }
 
-function renderSettings() {
-  // Settings tab is static HTML, just need save handler
-}
-
 function escapeHtml(str) {
   const div = document.createElement('div');
-  div.textContent = String(str || '');
+  div.textContent = String(str ?? '');
   return div.innerHTML;
+}
+
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function escapeCSV(str) {
@@ -136,7 +190,7 @@ function exportCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `social-scraper-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `labeldex-scraper-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -156,7 +210,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.add('active');
     activeTab = tab.dataset.tab;
 
-    // Show/hide panels
     document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
     document.getElementById(activeTab + 'Panel').style.display = 'block';
     render();
@@ -169,8 +222,9 @@ document.getElementById('saveToken').onclick = () => {
   chrome.storage.local.set({ scraperToken: token }, () => {
     const btn = document.getElementById('saveToken');
     const orig = btn.textContent;
-    btn.textContent = '✓ Saved!';
-    setTimeout(() => { btn.textContent = orig; }, 1500);
+    btn.textContent = '✓ Saved';
+    btn.classList.add('btn-saved');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('btn-saved'); }, 1500);
     if (token) loadQueue(token);
   });
 };
