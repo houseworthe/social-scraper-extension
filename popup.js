@@ -24,9 +24,7 @@ async function loadQueue(token) {
   listEl.innerHTML = '<div class="empty">Loading queue…</div>';
 
   try {
-    const resp = await fetch(`${API_BASE}/api/social-proof/queue`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
+    const resp = await fetch(`${API_BASE}/api/social-proof/queue?token=${encodeURIComponent(token)}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
 
