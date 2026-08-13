@@ -48,7 +48,7 @@
     if (!match) return null;
     let num = parseFloat(match[1]);
     if (match[2] === 'k') num *= 1000;
-    if (match[2] === 'm') *= 1000000;
+    if (match[2] === 'm') num *= 1000000;
     return Math.round(num);
   }
 
