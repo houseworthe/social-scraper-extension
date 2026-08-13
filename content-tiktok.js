@@ -329,7 +329,7 @@
 
       const data = await scrapePost();
       const sent = await sendToServer(data);
-      await saveLocal(data);
+      const count = await saveLocal(data);
 
       btn.style.background = '#2ecc71';
       btn.textContent = '✓ Scraped!';
