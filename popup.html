@@ -5,120 +5,138 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 360px;
+      width: 400px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #0f1419;
       color: #e7e9ea;
     }
     .header {
-      padding: 16px 20px;
+      padding: 14px 20px;
       background: linear-gradient(135deg, #0095f6, #fe2c55);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
     }
-    .header h1 { font-size: 16px; font-weight: 700; }
-    .header .count {
-      background: rgba(255,255,255,0.2);
-      padding: 2px 10px;
-      border-radius: 12px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .tabs {
-      display: flex;
-      border-bottom: 1px solid #2f3336;
-    }
+    .header h1 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+    .tabs { display: flex; gap: 4px; }
     .tab {
-      flex: 1;
-      padding: 10px;
-      text-align: center;
+      padding: 5px 12px;
+      border-radius: 6px;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
-      color: #71767b;
-      border-bottom: 2px solid transparent;
+      color: rgba(255,255,255,0.6);
+      background: rgba(255,255,255,0.1);
       transition: all 0.2s;
     }
-    .tab.active {
-      color: #e7e9ea;
-      border-bottom-color: #0095f6;
-    }
-    .actions {
-      padding: 16px 20px;
-      display: flex;
-      gap: 8px;
-    }
+    .tab.active { color: white; background: rgba(255,255,255,0.25); }
+    .tab:hover { background: rgba(255,255,255,0.2); }
+    .tab-panel { display: none; padding: 12px 16px 16px; }
+    .tab-panel.active-panel { display: block; }
+
+    .actions { display: flex; gap: 6px; margin-bottom: 10px; }
     .btn {
-      flex: 1;
-      padding: 10px;
-      border: none;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.2s;
+      flex: 1; padding: 7px; border: none; border-radius: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;
     }
     .btn:hover { opacity: 0.85; }
     .btn-export { background: #0095f6; color: white; }
     .btn-clear { background: #2f3336; color: #e7e9ea; }
-    .btn-copy { background: #2f3336; color: #e7e9ea; }
-    .data-list {
-      max-height: 300px;
-      overflow-y: auto;
-      padding: 0 20px 16px;
-    }
+
+    .data-list { max-height: 350px; overflow-y: auto; }
     .data-item {
-      padding: 10px 0;
-      border-bottom: 1px solid #1d2024;
-      font-size: 12px;
+      padding: 8px 0; border-bottom: 1px solid #1d2024; font-size: 12px;
     }
-    .data-item .platform {
-      display: inline-block;
-      padding: 1px 8px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      margin-right: 6px;
+    .platform {
+      display: inline-block; padding: 1px 7px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; margin-right: 5px;
     }
     .platform-Instagram { background: rgba(0,149,246,0.2); color: #0095f6; }
     .platform-TikTok { background: rgba(254,44,85,0.2); color: #fe2c55; }
-    .data-item .caption { color: #71767b; margin-top: 4px; }
-    .data-item .stats { color: #71767b; margin-top: 4px; }
-    .empty {
-      text-align: center;
-      padding: 40px 20px;
-      color: #71767b;
-      font-size: 13px;
+    .caption { color: #71767b; margin-top: 3px; }
+    .stats { color: #71767b; margin-top: 3px; font-size: 11px; }
+
+    .track-group { margin-bottom: 12px; }
+    .track-title { font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+    .track-title .artist { color: #71767b; font-weight: 400; }
+    .queue-item {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 8px; border-radius: 6px; font-size: 11px;
+      background: #1d2024; margin-bottom: 3px;
     }
+    .status-badge {
+      padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase;
+    }
+    .status-pending { background: rgba(251,196,0,0.2); color: #fbc400; }
+    .status-scraped { background: rgba(46,204,113,0.2); color: #2ecc71; }
+    .queue-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #71767b; }
+    .go-btn {
+      padding: 3px 10px; border: none; border-radius: 4px;
+      background: #0095f6; color: white; font-size: 11px; font-weight: 600; cursor: pointer;
+    }
+    .go-btn:hover { background: #1877f2; }
+
+    .empty { text-align: center; padding: 30px 16px; color: #71767b; font-size: 12px; }
+
+    .settings-field { margin-bottom: 12px; }
+    .settings-field label { display: block; font-size: 11px; font-weight: 600; color: #71767b; margin-bottom: 4px; }
+    .settings-field input {
+      width: 100%; padding: 7px 10px; border: 1px solid #2f3336; border-radius: 6px;
+      background: #0f1419; color: #e7e9ea; font-size: 12px; font-family: monospace;
+    }
+    .save-btn {
+      padding: 7px 16px; border: none; border-radius: 6px;
+      background: #0095f6; color: white; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .save-btn:hover { background: #1877f2; }
+
     .instructions {
-      padding: 12px 20px;
-      background: #1d2024;
-      font-size: 11px;
-      color: #71767b;
-      line-height: 1.5;
+      padding: 10px 16px; background: #1d2024; font-size: 11px;
+      color: #71767b; line-height: 1.5; border-bottom: 1px solid #2f3336;
     }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>📋 Social Scraper</h1>
-    <span class="count" id="count">0 scraped</span>
+    <div class="tabs">
+      <div class="tab active" data-tab="queue">Queue (<span id="queueCount">0</span>)</div>
+      <div class="tab" data-tab="local">Local (<span id="localCount">0</span>)</div>
+      <div class="tab" data-tab="settings">Settings</div>
+    </div>
   </div>
 
   <div class="instructions">
-    Navigate to any Instagram post, Reel, or TikTok video and click the floating "Scrape Post" button. Come back here to export your data.
+    Click a link from the queue, hit "Scrape Post" on the page, data goes straight to Label-Dex.
   </div>
 
-  <div class="actions">
-    <button class="btn btn-export" id="export">Export CSV</button>
-    <button class="btn btn-copy" id="copy">Copy JSON</button>
-    <button class="btn btn-clear" id="clear">Clear</button>
+  <!-- Queue Tab -->
+  <div class="tab-panel active-panel" id="queuePanel">
+    <div class="data-list" id="queueList">
+      <div class="empty">Loading queue...</div>
+    </div>
   </div>
 
-  <div class="data-list" id="dataList">
-    <div class="empty">No posts scraped yet. Go scrape something!</div>
+  <!-- Local Tab -->
+  <div class="tab-panel" id="localPanel">
+    <div class="actions">
+      <button class="btn btn-export" id="export">Export CSV</button>
+      <button class="btn btn-clear" id="clear">Clear Local</button>
+    </div>
+    <div class="data-list" id="localList">
+      <div class="empty">No posts scraped yet.</div>
+    </div>
+  </div>
+
+  <!-- Settings Tab -->
+  <div class="tab-panel" id="settingsPanel">
+    <div style="padding: 4px 0;">
+      <div class="settings-field">
+        <label>Label-Dex API Token</label>
+        <input type="password" id="token" placeholder="Enter your scraper token" />
+      </div>
+      <button class="save-btn" id="saveToken">Save Token</button>
+      <p style="margin-top: 12px; font-size: 11px; color: #71767b; line-height: 1.5;">
+        Get your token from the Label-Dex dashboard settings. This connects the extension to your Label-Dex account so scraped data flows into Firestore and shows up on the site live.
+      </p>
+    </div>
   </div>
 
   <script src="popup.js"></script>

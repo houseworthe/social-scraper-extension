@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Social Scraper",
-  "version": "1.0.0",
-  "description": "Scrape likes, comments, and engagement data from Instagram and TikTok posts.",
+  "version": "2.0.0",
+  "description": "Scrape engagement data from Instagram and TikTok, syncs directly to Label-Dex.",
   "permissions": ["storage", "downloads", "clipboardWrite"],
   "host_permissions": [
     "https://www.instagram.com/*",
     "https://instagram.com/*",
     "https://www.tiktok.com/*",
-    "https://tiktok.com/*"
+    "https://tiktok.com/*",
+    "https://label-dex.com/*",
+    "https://staging.label-dex.com/*"
   ],
   "action": {
     "default_popup": "popup.html",

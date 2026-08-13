@@ -1,108 +1,262 @@
-// content-ig.js — Instagram post scraper
-// Injects a "Scrape" button on IG posts and reels, extracts engagement data.
+// content-ig.js — Instagram post scraper v2
+// Resilient selectors using multiple strategies: aria labels, text patterns, structural traversal
 
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'social_scraper_data';
+  const API_BASE = 'https://label-dex.com';
   let scraped = [];
 
-  // Load previously scraped data
-  chrome.storage.local.get([STORAGE_KEY], (res) => {
-    scraped = res[STORAGE_KEY] || [];
-  });
-
-  function save() {
-    chrome.storage.local.set({ [STORAGE_KEY]: scraped });
+  function getCurrentTrackId() {
+    // The extension popup sets this in storage when user picks from queue
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['activeTrackId'], (res) => resolve(res.activeTrackId || null));
+    });
   }
 
-  // Extract numeric value from text like "1,234" or "12K" or "1.2M"
+  async function sendToServer(data) {
+    const token = await new Promise(r => chrome.storage.local.get(['scraperToken'], res => r(res.scraperToken || '')));
+    const trackId = await getCurrentTrackId();
+
+    const payload = { ...data, trackId };
+    try {
+      const resp = await fetch(`${API_BASE}/api/social-proof/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const json = await resp.json();
+      return json.ok === true;
+    } catch (e) {
+      console.log('[Social Scraper] Send failed, saving locally', e);
+      return false;
+    }
+  }
+
+  function saveLocal(data) {
+    scraped.push(data);
+    chrome.storage.local.set({ localScrapes: scraped });
+  }
+
   function parseCount(text) {
-    if (!text) return 0;
-    const cleaned = text.trim().toLowerCase().replace(/,/g, '');
+    if (!text) return null;
+    const cleaned = String(text).trim().toLowerCase().replace(/,/g, '');
     const match = cleaned.match(/([\d.]+)\s*([km])?/);
-    if (!match) return 0;
+    if (!match) return null;
     let num = parseFloat(match[1]);
     if (match[2] === 'k') num *= 1000;
-    if (match[2] === 'm') num *= 1000000;
+    if (match[2] === 'm') *= 1000000;
     return Math.round(num);
   }
 
-  // Extract data from a single IG post
-  function scrapePost() {
+  // Wait for element to appear (IG loads everything dynamically)
+  function waitForEl(selectorFn, timeout = 8000) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const check = () => {
+        const result = selectorFn();
+        if (result) return resolve(result);
+        if (Date.now() - start > timeout) return resolve(null);
+        setTimeout(check, 300);
+      };
+      check();
+    });
+  }
+
+  // Try multiple strategies to find an element
+  function findAnyStrategies(strategies) {
+    for (const fn of strategies) {
+      try {
+        const result = fn();
+        if (result) return result;
+      } catch (e) { /* try next */ }
+    }
+    return null;
+  }
+
+  function extractComments() {
+    const comments = [];
+    // Strategy 1: Explicit comment list items
+    const selectors = [
+      'ul div[role="listitem"]',
+      '[data-testid="post-comment"]',
+      'article ul li span[dir="auto"]',
+      // v2 layout: comment blocks with username + text
+      'article ul li div[class*="comment"] span[dir="auto"]',
+    ];
+    for (const sel of selectors) {
+      const els = document.querySelectorAll(sel);
+      if (els.length > 0) {
+        els.forEach((el, i) => {
+          const text = el.textContent.trim();
+          if (text && text.length > 2 && i < 30) {
+            // Try to get username + comment together
+            const parent = el.closest('li, [role="listitem"]');
+            let username = '';
+            if (parent) {
+              const userEl = parent.querySelector('a[href*="/"] span, a[role="link"]');
+              if (userEl) username = userEl.textContent.trim();
+            }
+            comments.push(username ? `${username}: ${text}` : text);
+          }
+        });
+        if (comments.length) break;
+      }
+    }
+    return comments;
+  }
+
+  async function scrapePost() {
+    // Wait for page to settle
+    await new Promise(r => setTimeout(r, 1500));
+
     const data = {
       platform: 'Instagram',
       url: window.location.href,
       scrapedAt: new Date().toISOString(),
     };
 
-    // Try to get caption
-    const captionEl = document.querySelector('h1, [data-testid="post-caption"], article span[dir="auto"]');
-    if (captionEl) data.caption = captionEl.textContent.trim().slice(0, 2000);
-
-    // Try to get username
-    const usernameEl = document.querySelector('article a[href*="/"] span, header a span, [data-testid="post-username"] a, a[role="link"] h2 span');
-    if (usernameEl) data.username = usernameEl.textContent.trim();
-
-    // Fallback username detection
-    if (!data.username) {
-      const headerLink = document.querySelector('article header a, section header a');
-      if (headerLink) {
-        const href = headerLink.getAttribute('href');
-        if (href) data.username = href.replace(/^\//, '').replace(/\/.*$/, '');
-      }
-    }
-
-    // Likes - try multiple selectors for different IG layouts
-    const likesSelectors = [
-      'section a[href*="/liked_by/"] span',
-      '[data-testid="like-count"]',
-      'a[href*="liked_by"]',
-      'article section div span',
-    ];
-    for (const sel of likesSelectors) {
-      const el = document.querySelector(sel);
-      if (el) {
-        const text = el.textContent;
-        const likesMatch = text.match(/([\d,.]+[km]?)\s*(likes|like)?/i);
-        if (likesMatch) {
-          data.likes = parseCount(likesMatch[1]);
-          break;
+    // ===== USERNAME =====
+    data.username = findAnyStrategies([
+      () => {
+        // Article header link
+        const a = document.querySelector('article header a, section main header a');
+        if (a) {
+          const href = a.getAttribute('href') || '';
+          const m = href.match(/^\/([^/]+)/);
+          return m ? m[1] : null;
         }
-      }
-    }
+      },
+      () => {
+        // Span inside header link
+        const el = document.querySelector('article header a span, header a[href*="/"] span');
+        return el ? el.textContent.trim() : null;
+      },
+      () => {
+        // Username visible anywhere in a link matching /username/
+        const links = document.querySelectorAll('a[href^="/"]');
+        for (const l of links) {
+          const href = l.getAttribute('href') || '';
+          const m = href.match(/^\/([a-z0-9._]+)\/(p|reel|reels)\//i);
+          if (m) return m[1];
+        }
+        return null;
+      },
+      () => {
+        // meta tag
+        const meta = document.querySelector('meta[property="og:title"]');
+        if (meta) {
+          const m = meta.content.match(/@([a-z0-9._]+)/i);
+          if (m) return m[1];
+        }
+        return null;
+      },
+    ]);
 
-    // Views (for Reels)
-    const viewsEl = document.querySelector('[data-testid="video-view-count"], video + div span, [aria-label*="views"], [aria-label*="plays"]');
-    if (viewsEl) {
-      const viewsMatch = viewsEl.textContent.match(/([\d,.]+[km]?)\s*(views|plays)?/i);
-      if (viewsMatch) data.views = parseCount(viewsMatch[1]);
-    }
+    // ===== CAPTION =====
+    data.caption = findAnyStrategies([
+      () => {
+        // h1 is sometimes caption on Reels
+        const h1 = document.querySelector('h1');
+        if (h1 && h1.textContent.length > 10) return h1.textContent.trim().slice(0, 2000);
+        return null;
+      },
+      () => {
+        // Article caption span
+        const el = document.querySelector('article div[dir="auto"] span[dir="auto"], [data-testid="post-caption"]');
+        return el ? el.textContent.trim().slice(0, 2000) : null;
+      },
+      () => {
+        // meta description (usually contains caption text)
+        const meta = document.querySelector('meta[property="og:description"]');
+        if (meta) {
+          // Strip "X likes, Y comments" suffix
+          return meta.content.replace(/\d+.*?(likes|comments).*$/i, '').trim().slice(0, 2000) || null;
+        }
+        return null;
+      },
+    ]);
 
-    // Comments count
-    const commentsEl = document.querySelector('[data-testid="comment-count"], a[href*="/comments/"]');
-    if (commentsEl) {
-      const text = commentsEl.textContent;
-      const commentMatch = text.match(/([\d,.]+[km]?)\s*(comments|comment)?/i);
-      if (commentMatch) data.commentCount = parseCount(commentMatch[1]);
-    }
+    // ===== LIKES =====
+    data.likes = findAnyStrategies([
+      () => {
+        // "X likes" link
+        const el = document.querySelector('a[href*="liked_by"], section a[href*="/liked_by/"]');
+        if (el) return parseCount(el.textContent);
+        return null;
+      },
+      () => {
+        // aria-label with likes
+        const els = document.querySelectorAll('[aria-label]');
+        for (const el of els) {
+          const label = el.getAttribute('aria-label') || '';
+          const m = label.match(/([\d,.]+\s*[km]?)\s*likes?/i);
+          if (m) return parseCount(m[1]);
+        }
+        return null;
+      },
+      () => {
+        // "X likes" text anywhere in article
+        const text = document.querySelector('article')?.textContent || '';
+        const m = text.match(/([\d,.]+\s*[km]?)\s*likes?/i);
+        if (m && !m[1].includes('\n')) return parseCount(m[1]);
+        return null;
+      },
+    ]);
 
-    // Get comments text (visible ones)
-    const commentItems = document.querySelectorAll('[data-testid="post-comment"], ul div[role="listitem"] span[dir="auto"]');
-    const comments = [];
-    commentItems.forEach((item, i) => {
-      const text = item.textContent.trim();
-      if (text && text.length > 1 && i < 50) comments.push(text);
-    });
+    // ===== COMMENT COUNT =====
+    data.commentCount = findAnyStrategies([
+      () => {
+        // "View X comments" or "X comments" link
+        const els = document.querySelectorAll('article a, article button, article span');
+        for (const el of els) {
+          const text = el.textContent;
+          const m = text.match(/([\d,.]+\s*[km]?)\s*comments?/i);
+          if (m) return parseCount(m[1]);
+        }
+        return null;
+      },
+      () => {
+        // Count visible comment elements
+        const comments = extractComments();
+        if (comments.length > 0) return comments.length;
+        return null;
+      },
+    ]);
+
+    // ===== VIEWS (Reels) =====
+    data.views = findAnyStrategies([
+      () => {
+        const els = document.querySelectorAll('[aria-label]');
+        for (const el of els) {
+          const label = el.getAttribute('aria-label') || '';
+          const m = label.match(/([\d,.]+\s*[km]?)\s*(views|plays)/i);
+          if (m) return parseCount(m[1]);
+        }
+        return null;
+      },
+      () => {
+        const text = document.querySelector('article')?.textContent || '';
+        const m = text.match(/([\d,.]+\s*[km]?)\s*views/i);
+        if (m) return parseCount(m[1]);
+        return null;
+      },
+    ]);
+
+    // ===== COMMENTS (text) =====
+    const comments = extractComments();
     if (comments.length) data.comments = comments;
 
-    // Timestamp
-    const timeEl = document.querySelector('time, [data-testid="timestamp"], [datetime]');
+    // ===== POST DATE =====
+    const timeEl = document.querySelector('time, [datetime], [data-testid="timestamp"]');
     if (timeEl) {
-      data.postDate = timeEl.getAttribute('datetime') || timeEl.textContent.trim();
+      data.postDate = timeEl.getAttribute('datetime') || timeEl.getAttribute('title') || timeEl.textContent.trim();
     }
 
-    // Hashtags from caption
+    // ===== HASHTAGS =====
     if (data.caption) {
       const hashtags = data.caption.match(/#[\w]+/g);
       if (hashtags) data.hashtags = hashtags;
@@ -111,9 +265,12 @@
     return data;
   }
 
-  // Inject floating scrape button
   function injectButton() {
     if (document.getElementById('ig-scraper-btn')) return;
+
+    // Only inject on post/reel pages
+    const isPost = /\/(p|reel|reels)\//.test(window.location.pathname);
+    if (!isPost) return;
 
     const btn = document.createElement('button');
     btn.id = 'ig-scraper-btn';
@@ -138,36 +295,41 @@
     btn.onmouseenter = () => (btn.style.background = '#1877f2');
     btn.onmouseleave = () => (btn.style.background = '#0095f6');
 
-    btn.onclick = () => {
-      const data = scrapePost();
-      scraped.push(data);
-      save();
+    btn.onclick = async () => {
+      btn.textContent = '⏳ Scraping...';
+      btn.disabled = true;
 
-      // Flash green
-      btn.style.background = '#2ecc71';
-      btn.textContent = '✓ Scraped!';
+      const data = await scrapePost();
+
+      // Send to Firestore via API
+      const sent = await sendToServer(data);
+      saveLocal(data);
+
+      btn.style.background = sent ? '#2ecc71' : '#f39c12';
+      btn.textContent = sent ? '✓ Sent to LabelDex!' : '✓ Saved locally';
       setTimeout(() => {
         btn.style.background = '#0095f6';
         btn.textContent = '📋 Scrape Post';
-      }, 1500);
+        btn.disabled = false;
+      }, 2000);
 
-      // Send to background for badge update
       chrome.runtime.sendMessage({ type: 'SCRAPED', count: scraped.length });
     };
 
     document.body.appendChild(btn);
   }
 
-  // Re-inject on navigation (IG is a SPA)
+  // Re-inject on SPA navigation
   let lastUrl = window.location.href;
   const observer = new MutationObserver(() => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
-      setTimeout(injectButton, 1000);
+      const old = document.getElementById('ig-scraper-btn');
+      if (old) old.remove();
+      setTimeout(injectButton, 1500);
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Initial inject
-  setTimeout(injectButton, 2000);
+  setTimeout(injectButton, 2500);
 })();

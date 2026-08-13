@@ -1,87 +1,281 @@
-// content-tiktok.js — TikTok post scraper
-// Injects a "Scrape" button on TikTok videos, extracts engagement data.
+// content-tiktok.js — TikTok post scraper v2
+// Resilient selectors using aria labels, text patterns, and structural traversal
 
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'social_scraper_data';
+  const API_BASE = 'https://label-dex.com';
   let scraped = [];
 
-  chrome.storage.local.get([STORAGE_KEY], (res) => {
-    scraped = res[STORAGE_KEY] || [];
-  });
+  function getCurrentTrackId() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['activeTrackId'], (res) => resolve(res.activeTrackId || null));
+    });
+  }
 
-  function save() {
-    chrome.storage.local.set({ [STORAGE_KEY]: scraped });
+  async function sendToServer(data) {
+    const token = await new Promise(r => chrome.storage.local.get(['scraperToken'], res => r(res.scraperToken || '')));
+    const trackId = await getCurrentTrackId();
+
+    const payload = { ...data, trackId };
+    try {
+      const resp = await fetch(`${API_BASE}/api/social-proof/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const json = await resp.json();
+      return json.ok === true;
+    } catch (e) {
+      console.log('[Social Scraper] Send failed, saving locally', e);
+      return false;
+    }
+  }
+
+  function saveLocal(data) {
+    scraped.push(data);
+    chrome.storage.local.set({ localScrapes: scraped });
   }
 
   function parseCount(text) {
-    if (!text) return 0;
-    const cleaned = text.trim().toLowerCase().replace(/,/g, '');
+    if (!text) return null;
+    const cleaned = String(text).trim().toLowerCase().replace(/,/g, '');
     const match = cleaned.match(/([\d.]+)\s*([km])?/);
-    if (!match) return 0;
+    if (!match) return null;
     let num = parseFloat(match[1]);
     if (match[2] === 'k') num *= 1000;
     if (match[2] === 'm') num *= 1000000;
     return Math.round(num);
   }
 
-  function scrapePost() {
+  function findAny(strategies) {
+    for (const fn of strategies) {
+      try {
+        const result = fn();
+        if (result !== null && result !== undefined && result !== '') return result;
+      } catch (e) { /* try next */ }
+    }
+    return null;
+  }
+
+  function extractComments() {
+    const comments = [];
+
+    // Strategy 1: data-e2e comment elements
+    const selectors = [
+      '[data-e2e="comment-desc"]',
+      '[data-e2e="browse-comment-desc"]',
+      '[class*="CommentContent"]',
+      '[class*="comment-content"]',
+      // Comment list items with text
+      '[data-e2e="comment-list"] span',
+      '[data-e2e="browse-comment-list"] span',
+    ];
+
+    for (const sel of selectors) {
+      const els = document.querySelectorAll(sel);
+      if (els.length > 0) {
+        els.forEach((el, i) => {
+          const text = el.textContent.trim();
+          if (text && text.length > 2 && i < 30) {
+            // Try to find username sibling
+            const parent = el.closest('[data-e2e="comment-item"], [class*="CommentItem"], li, div');
+            let username = '';
+            if (parent) {
+              const userEl = parent.querySelector('a[href*="/@"], [data-e2e="comment-user-uniqueid"], [class*="UserName"]');
+              if (userEl) username = userEl.textContent.trim().replace(/^@/, '');
+            }
+            comments.push(username ? `${username}: ${text}` : text);
+          }
+        });
+        if (comments.length) break;
+      }
+    }
+
+    return comments;
+  }
+
+  async function scrapePost() {
+    // Wait for dynamic content
+    await new Promise(r => setTimeout(r, 2000));
+
     const data = {
       platform: 'TikTok',
       url: window.location.href,
       scrapedAt: new Date().toISOString(),
     };
 
-    // Caption / description
-    const captionEl = document.querySelector('[data-e2e="video-desc"], [data-e2e="browse-video-desc"], h1');
-    if (captionEl) data.caption = captionEl.textContent.trim().slice(0, 2000);
+    // ===== USERNAME =====
+    data.username = findAny([
+      () => {
+        const el = document.querySelector('[data-e2e="video-author-uniqueid"], [data-e2e="browse-username"]');
+        return el ? el.textContent.trim().replace(/^@/, '') : null;
+      },
+      () => {
+        const el = document.querySelector('a[href*="/@"]');
+        if (el) {
+          const m = el.getAttribute('href').match(/\/@([\w.]+)/);
+          return m ? m[1] : null;
+        }
+        return null;
+      },
+      () => {
+        const m = window.location.pathname.match(/\/@([\w.]+)/);
+        return m ? m[1] : null;
+      },
+      () => {
+        const meta = document.querySelector('meta[property="og:title"]');
+        if (meta) {
+          const m = meta.content.match(/@([\w.]+)/);
+          return m ? m[1] : null;
+        }
+        return null;
+      },
+    ]);
 
-    // Username
-    const usernameEl = document.querySelector('[data-e2e="video-author-uniqueid"], [data-e2e="browse-username"] a, a[href*="/@"]');
-    if (usernameEl) {
-      data.username = usernameEl.textContent.trim().replace(/^@/, '');
+    // ===== CAPTION =====
+    data.caption = findAny([
+      () => {
+        const el = document.querySelector('[data-e2e="video-desc"], [data-e2e="browse-video-desc"]');
+        return el ? el.textContent.trim().slice(0, 2000) : null;
+      },
+      () => {
+        const el = document.querySelector('h1');
+        if (el && el.textContent.length > 5) return el.textContent.trim().slice(0, 2000);
+        return null;
+      },
+      () => {
+        const meta = document.querySelector('meta[property="og:description"]');
+        return meta ? meta.content.trim().slice(0, 2000) : null;
+      },
+    ]);
+
+    // ===== LIKES =====
+    data.likes = findAny([
+      () => {
+        const el = document.querySelector('[data-e2e="like-count"], [data-e2e="browse-like-count"]');
+        return el ? parseCount(el.textContent) : null;
+      },
+      () => {
+        const els = document.querySelectorAll('[aria-label]');
+        for (const el of els) {
+          const label = el.getAttribute('aria-label') || '';
+          const m = label.match(/([\d,.]+\s*[km]?)\s*likes?/i);
+          if (m) return parseCount(m[1]);
+        }
+        return null;
+      },
+      () => {
+        // Like button container with count
+        const btn = document.querySelector('[data-e2e="like-icon"] ~ span, [data-e2e="browse-like-icon"] ~ span, button[data-e2e="like-button"] span');
+        return btn ? parseCount(btn.textContent) : null;
+      },
+    ]);
+
+    // ===== COMMENT COUNT =====
+    data.commentCount = findAny([
+      () => {
+        const el = document.querySelector('[data-e2e="comment-count"], [data-e2e="browse-comment-count"]');
+        return el ? parseCount(el.textContent) : null;
+      },
+      () => {
+        const els = document.querySelectorAll('[aria-label]');
+        for (const el of els) {
+          const label = el.getAttribute('aria-label') || '';
+          const m = label.match(/([\d,.]+\s*[km]?)\s*comments?/i);
+          if (m) return parseCount(m[1]);
+        }
+        return null;
+      },
+      () => {
+        // Count from icon sibling
+        const btn = document.querySelector('[data-e2e="comment-icon"] ~ span, [data-e2e="browse-comment-icon"] ~ span');
+        return btn ? parseCount(btn.textContent) : null;
+      },
+    ]);
+
+    // ===== SHARES =====
+    data.shares = findAny([
+      () => {
+        const el = document.querySelector('[data-e2e="share-count"], [data-e2e="browse-share-count"]');
+        return el ? parseCount(el.textContent) : null;
+      },
+      () => {
+        const btn = document.querySelector('[data-e2e="share-icon"] ~ span, [data-e2e="browse-share-icon"] ~ span');
+        return btn ? parseCount(btn.textContent) : null;
+      },
+    ]);
+
+    // ===== SAVES / BOOKMARKS =====
+    data.saves = findAny([
+      () => {
+        const btn = document.querySelector('[data-e2e="undefined-count"], [data-e2e="browse-undefined-count"]');
+        return btn ? parseCount(btn.textContent) : null;
+      },
+      () => {
+        const els = document.querySelectorAll('[aria-label]');
+        for (const el of els) {
+          const label = el.getAttribute('aria-label') || '';
+          const m = label.match(/([\d,.]+\s*[km]?)\s*(saves|bookmarks|favorites)/i);
+          if (m) return parseCount(m[1]);
+        }
+        return null;
+      },
+    ]);
+
+    // ===== VIEWS / PLAYS =====
+    data.views = findAny([
+      () => {
+        const el = document.querySelector('[data-e2e="video-views"], [data-e2e="browse-video-views"]');
+        return el ? parseCount(el.textContent) : null;
+      },
+      () => {
+        const els = document.querySelectorAll('[aria-label]');
+        for (const el of els) {
+          const label = el.getAttribute('aria-label') || '';
+          const m = label.match(/([\d,.]+\s*[km]?)\s*(views|plays)/i);
+          if (m) return parseCount(m[1]);
+        }
+        return null;
+      },
+      () => {
+        // Text-based search
+        const text = document.body.textContent || '';
+        const m = text.match(/([\d,.]+\s*[km]?)\s*views/i);
+        if (m && !m[1].includes('\n')) return parseCount(m[1]);
+        return null;
+      },
+    ]);
+
+    // ===== COMMENTS (text) =====
+    // Try clicking "View X comments" to load them first
+    const viewCommentsBtn = document.querySelector('[data-e2e="scroll-comment"], [data-e2e="browse-comment"]');
+    if (viewCommentsBtn && data.commentCount > 0 && data.commentCount <= 50) {
+      try {
+        viewCommentsBtn.click();
+        await new Promise(r => setTimeout(r, 1500));
+      } catch (e) { /* continue anyway */ }
     }
-    if (!data.username) {
-      const match = window.location.pathname.match(/\/@([\w.]+)/);
-      if (match) data.username = match[1];
-    }
 
-    // Likes
-    const likesEl = document.querySelector('[data-e2e="like-count"], [data-e2e="browse-like-count"]');
-    if (likesEl) data.likes = parseCount(likesEl.textContent);
-
-    // Comments count
-    const commentsCountEl = document.querySelector('[data-e2e="comment-count"], [data-e2e="browse-comment-count"]');
-    if (commentsCountEl) data.commentCount = parseCount(commentsCountEl.textContent);
-
-    // Shares / bookmarks
-    const sharesEl = document.querySelector('[data-e2e="share-count"], [data-e2e="browse-share-count"]');
-    if (sharesEl) data.shares = parseCount(sharesEl.textContent);
-
-    const savesEl = document.querySelector('[data-e2e="undefined-count"]');
-    if (savesEl) data.saves = parseCount(savesEl.textContent);
-
-    // Views / plays
-    const viewsEl = document.querySelector('[data-e2e="video-views"], [data-e2e="browse-video-views"]');
-    if (viewsEl) data.views = parseCount(viewsEl.textContent);
-
-    // Get visible comments
-    const commentEls = document.querySelectorAll('[data-e2e="comment-desc"], [data-e2e="browse-comment-desc"], [class*="CommentText"]');
-    const comments = [];
-    commentEls.forEach((el, i) => {
-      const text = el.textContent.trim();
-      if (text && text.length > 1 && i < 50) comments.push(text);
-    });
+    const comments = extractComments();
     if (comments.length) data.comments = comments;
 
-    // Date
-    const dateEl = document.querySelector('[data-e2e="video-create-time"], time');
-    if (dateEl) {
-      data.postDate = dateEl.getAttribute('datetime') || dateEl.textContent.trim();
-    }
+    // ===== POST DATE =====
+    data.postDate = findAny([
+      () => {
+        const el = document.querySelector('[data-e2e="video-create-time"]');
+        return el ? el.textContent.trim() : null;
+      },
+      () => {
+        const el = document.querySelector('time, [datetime]');
+        return el ? (el.getAttribute('datetime') || el.textContent.trim()) : null;
+      },
+    ]);
 
-    // Hashtags
+    // ===== HASHTAGS =====
     if (data.caption) {
       const hashtags = data.caption.match(/#[\w]+/g);
       if (hashtags) data.hashtags = hashtags;
@@ -92,6 +286,10 @@
 
   function injectButton() {
     if (document.getElementById('tiktok-scraper-btn')) return;
+
+    // Only on video pages
+    const isVideo = /\/video\//.test(window.location.pathname) || /\/@[\w.]+\/video\//.test(window.location.pathname);
+    if (!isVideo) return;
 
     const btn = document.createElement('button');
     btn.id = 'tiktok-scraper-btn';
@@ -116,17 +314,21 @@
     btn.onmouseenter = () => (btn.style.background = '#e0244a');
     btn.onmouseleave = () => (btn.style.background = '#fe2c55');
 
-    btn.onclick = () => {
-      const data = scrapePost();
-      scraped.push(data);
-      save();
+    btn.onclick = async () => {
+      btn.textContent = '⏳ Scraping...';
+      btn.disabled = true;
 
-      btn.style.background = '#2ecc71';
-      btn.textContent = '✓ Scraped!';
+      const data = await scrapePost();
+      const sent = await sendToServer(data);
+      saveLocal(data);
+
+      btn.style.background = sent ? '#2ecc71' : '#f39c12';
+      btn.textContent = sent ? '✓ Sent to LabelDex!' : '✓ Saved locally';
       setTimeout(() => {
         btn.style.background = '#fe2c55';
         btn.textContent = '📋 Scrape Post';
-      }, 1500);
+        btn.disabled = false;
+      }, 2000);
 
       chrome.runtime.sendMessage({ type: 'SCRAPED', count: scraped.length });
     };
@@ -138,10 +340,12 @@
   const observer = new MutationObserver(() => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
-      setTimeout(injectButton, 1000);
+      const old = document.getElementById('tiktok-scraper-btn');
+      if (old) old.remove();
+      setTimeout(injectButton, 2000);
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  setTimeout(injectButton, 2000);
+  setTimeout(injectButton, 2500);
 })();
