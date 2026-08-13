@@ -149,12 +149,32 @@
 
     data.commentCount = findAny([
       () => { const els = document.querySelectorAll('article a, article button, article span'); for (const el of els) { const m = el.textContent.match(/([\d,.]+\s*[km]?)\s*comments?/i); if (m) return parseCount(m[1]); } return null; },
-      () => { const c = extractComments(); return c.length > 0 ? c.length : null; },
+      () => { const m = altBlob.match(/([\d,.]+\s*[km]?)\s*comments?/i); return m ? parseCount(m[1]) : null; },
+    ]);
+
+    // ===== REPOSTS / SHARES =====
+    data.shares = findAny([
+      () => { const els = document.querySelectorAll('[aria-label]'); for (const el of els) { const m = (el.getAttribute('aria-label') || '').match(/([\d,.]+\s*[km]?)\s*(shares|reposts|sends)/i); if (m) return parseCount(m[1]); } return null; },
+      () => { const m = altBlob.match(/([\d,.]+\s*[km]?)\s*(shares|reposts)/i); return m ? parseCount(m[1]) : null; },
     ]);
 
     data.views = findAny([
       () => { const els = document.querySelectorAll('[aria-label]'); for (const el of els) { const m = (el.getAttribute('aria-label') || '').match(/([\d,.]+\s*[km]?)\s*(views|plays)/i); if (m) return parseCount(m[1]); } return null; },
     ]);
+
+    // ===== COMMENTS (text) =====
+    // Try to load comments by clicking any "View comments" button
+    const viewComments = [...document.querySelectorAll('article button, article a, article span')]
+      .find(el => /view.*comments|\d+.*comments?/i.test(el.textContent));
+    if (viewComments) {
+      try {
+        viewComments.click();
+        await new Promise(r => setTimeout(r, 2000));
+      } catch (e) { }
+    }
+    // Also try scrolling down to trigger lazy-loaded comments
+    window.scrollBy(0, 600);
+    await new Promise(r => setTimeout(r, 1000));
 
     const comments = extractComments();
     if (comments.length) data.comments = comments;

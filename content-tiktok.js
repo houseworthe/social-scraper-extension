@@ -142,9 +142,13 @@
       () => { const els = document.querySelectorAll('[aria-label]'); for (const el of els) { const m = (el.getAttribute('aria-label') || '').match(/([\d,.]+\s*[km]?)\s*(views|plays)/i); if (m) return parseCount(m[1]); } return null; },
     ]);
 
-    const viewCommentsBtn = document.querySelector('[data-e2e="scroll-comment"], [data-e2e="browse-comment"]');
-    if (viewCommentsBtn && data.commentCount > 0 && data.commentCount <= 50) {
-      try { viewCommentsBtn.click(); await new Promise(r => setTimeout(r, 1500)); } catch (e) { }
+    // Open the comment panel by clicking the comments button
+    const commentBtn = document.querySelector('[data-e2e="scroll-comment"], [data-e2e="browse-comment"], [data-e2e="comment-icon"]');
+    if (commentBtn) {
+      try {
+        commentBtn.click();
+        await new Promise(r => setTimeout(r, 2000));
+      } catch (e) { }
     }
 
     const comments = extractComments();
