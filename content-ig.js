@@ -163,19 +163,21 @@
     ]);
 
     // ===== COMMENTS (text) =====
-    // Try to load comments by clicking any "View comments" button
-    const viewComments = [...document.querySelectorAll('article button, article a, article span')]
-      .find(el => /view.*comments|\d+.*comments?/i.test(el.textContent));
-    if (viewComments) {
+    // IG Reels: click the Comment button to open the comment panel
+    const commentBtn = [...document.querySelectorAll('button')]
+      .find(b => /^Comment\s*\d+/i.test(b.textContent) || b.querySelector('img[alt="Comment"]'));
+    if (commentBtn) {
       try {
-        viewComments.click();
-        await new Promise(r => setTimeout(r, 2000));
+        commentBtn.click();
+        await new Promise(r => setTimeout(r, 2500));
       } catch (e) { }
     }
-    // Also try scrolling down to trigger lazy-loaded comments
-    window.scrollBy(0, 600);
-    await new Promise(r => setTimeout(r, 1000));
-
+    // Scroll within the comment panel if it opened
+    const commentPanel = document.querySelector('ul[class*="comment"], div[class*="comment"] ul, [aria-label="Comments"]');
+    if (commentPanel) {
+      commentPanel.scrollTop = commentPanel.scrollHeight;
+      await new Promise(r => setTimeout(r, 1000));
+    }
     const comments = extractComments();
     if (comments.length) data.comments = comments;
 

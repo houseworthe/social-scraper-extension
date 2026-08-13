@@ -86,15 +86,29 @@
       const els = document.querySelectorAll(sel);
       if (els.length > 0) {
         els.forEach((el, i) => {
-          const text = el.textContent.trim();
-          if (text && text.length > 2 && i < 30) {
+          let text = el.textContent.trim();
+          // Clean: remove trailing timestamps and Reply buttons
+          // e.g. "TobeyCome on the boys22h ago Reply2" -> "Come on the boys"
+          text = text.replace(/\s*\d+[hmds]+\s*ago\s*Reply\s*\d*\s*$/i, '');
+          text = text.replace(/\s*Reply\s*\d*\s*$/i, '');
+          // Remove leading duplicated username (TikTok sometimes doubles it)
+          const dupMatch = text.match(/^([A-Za-z0-9_.]+)\1(.+)$/);
+          if (dupMatch) text = dupMatch[1] + dupMatch[2];
+          if (text && text.length > 2 && text.length < 500 && i < 30) {
             const parent = el.closest('[data-e2e="comment-item"], li, div');
             let username = '';
             if (parent) {
               const userEl = parent.querySelector('a[href*="/@"], [data-e2e="comment-user-uniqueid"]');
               if (userEl) username = userEl.textContent.trim().replace(/^@/, '');
             }
-            comments.push(username ? `${username}: ${text}` : text);
+            // Don't double-add username if it's already in the text
+            if (username && text.startsWith(username)) {
+              comments.push(text);
+            } else if (username) {
+              comments.push(`${username}: ${text}`);
+            } else {
+              comments.push(text);
+            }
           }
         });
         if (comments.length) break;
