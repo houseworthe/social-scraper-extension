@@ -8,7 +8,7 @@
   'use strict';
 
   const API_BASE = 'https://staging.label-dex.com';
-  console.log('[LD Scraper] content-ig v4.2 loaded on', location.pathname);
+  console.log('[LD Scraper] content-ig v4.3 loaded on', location.pathname);
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const storageGet = (keys) => new Promise(r => chrome.storage.local.get(keys, r));
 
@@ -79,6 +79,10 @@
     return null;
   }
 
+  // "3 days ago", "3d", "19h" — timestamps, never captions
+  const isTimeStamp = (t) => /^[\d.,]+\s*(s|m|h|d|w|y)(ago)?$/i.test((t || '').trim()) ||
+    /^[\d.,]+\s+(second|minute|hour|day|week|month|year)s?\s+ago$/i.test((t || '').trim());
+
   // ============ COMMENTS ============
 
   const textOf = (el) => (el.textContent || '').replace(/[\u200b-\u200f\u202a-\u202e\uFEFF\u2060]/g, '').replace(/\s+/g, ' ').trim();
@@ -95,7 +99,8 @@
     '^(like\s*reply|reply\s*like|likereply)$',
     '^like(reply|comment)?s?$',
     '^[\\d.,]+[km]?\\s*(likes?|replies|views)?$',
-    '^(log in to like or comment.*|sign up|log in)$',
+    '^(log in to like or comment.*|log in to (or|like|reply|post).*|sign up|log in)$',
+    '^like\d*comment\d*share?.*$',
   ].join('|'), 'i');
 
   function extractFromUnit(unit) {
@@ -130,6 +135,9 @@
       text = text.slice(username.length).trim();
     }
     if (!text || text.length < 2 || text.length > 500) return null;
+    // Comments always carry a username on both layouts; no-anchor hits are
+    // chrome (action bars, prompts) — drop them.
+    if (!username) return null;
     return username ? `${username}: ${text}` : text;
   }
 
@@ -154,7 +162,65 @@
       }
       if (all.length) return all;
     }
+    // Strategy 3: plain-DIV comment layout — /p/ photo posts (and some
+    // variants) render comments as sibling DIVs with no list roles at all.
+    for (const u of divCommentUnits()) {
+      if (!u.querySelector('a[href^="/"]')) continue;
+      const c = extractFromUnit(u);
+      if (c) all.push(c);
+    }
     return all;
+  }
+
+  function divCommentUnits() {
+    // Comments as plain sibling DIVs, each holding a profile anchor + text
+    // ("user 3d comment text Like Reply"). Walk ancestors of username anchors,
+    // collect candidate sibling sets, then pick the set whose children MOST
+    // look like single comments: exactly one username anchor each. Children
+    // that don't (merged blocks, action bars) are filtered out.
+    const anchors = [...document.querySelectorAll('a[href^="/"]')]
+      .filter(a => /^\/([A-Za-z0-9._]+)\/?$/.test(a.getAttribute('href') || ''));
+    // Commenter anchor: text matches its own href username, no @ prefix.
+    // Mention anchors ("@robbiedoherty") live INSIDE comment text — they don't
+    // count toward the one-commenter limit.
+    const commenterAnchors = (el) =>
+      [...el.querySelectorAll('a[href^="/"]')].filter(a => {
+        const href = a.getAttribute('href') || '';
+        const m = href.match(/^\/([A-Za-z0-9._]+)\/?$/);
+        if (!m) return false;
+        const t = (a.textContent || '').trim();
+        return t && !t.startsWith('@') && t.replace(/^@/, '').replace(/Verified$/, '') === m[1];
+      });
+    const isUsernameAnchor = (el) => commenterAnchors(el).length === 1;
+    const candidates = [];
+    for (const a of anchors) {
+      let el = a;
+      for (let depth = 0; depth < 6 && el.parentElement; depth++) {
+        el = el.parentElement;
+        const parent = el.parentElement;
+        if (!parent) break;
+        const kids = [...parent.children];
+        if (kids.length < 2) continue;
+        const anchored = kids.filter(k => k.querySelector('a[href^="/"]'));
+        if (anchored.length >= Math.max(2, Math.ceil(kids.length * 0.6))) {
+          candidates.push(kids);
+        }
+      }
+    }
+    let best = null;
+    let bestScore = 0;
+    const seen = new Set();
+    for (const set of candidates) {
+      const key = set.length + ':' + (set[0] && set[0].outerHTML ? set[0].outerHTML.slice(0, 80) : '');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const commentish = set.filter(isUsernameAnchor);
+      if (commentish.length > bestScore) {
+        bestScore = commentish.length;
+        best = commentish;
+      }
+    }
+    return best || [];
   }
 
   function extractComments(caption) {
@@ -195,23 +261,26 @@
       () => { const meta = document.querySelector('meta[property="og:title"]'); if (meta) { const m = meta.content.match(/@([a-z0-9._]+)/i); if (m) return m[1]; } return null; },
     ]);
 
+    const ogMeta = document.querySelector('meta[property="og:description"]')?.content || '';
+
     data.caption = findAny([
-      () => { const h1 = document.querySelector('h1'); if (h1 && h1.textContent.length > 10) return h1.textContent.trim().slice(0, 2000); return null; },
-      () => { const el = document.querySelector('article div[dir="auto"] span[dir="auto"], [data-testid="post-caption"]'); return el ? el.textContent.trim().slice(0, 2000) : null; },
-      () => { const meta = document.querySelector('meta[property="og:description"]'); return meta ? meta.content.trim().slice(0, 2000) || null : null; },
+      // og:description carries the full caption in quotes — most reliable on /p/ photo posts
+      () => { const m = ogMeta.match(/:\s*"([\s\S]*)"\.?\s*$/); return m ? m[1].trim().slice(0, 2000) : null; },
+      () => { const h1 = document.querySelector('h1'); if (h1 && h1.textContent.length > 10 && !isTimeStamp(h1.textContent)) return h1.textContent.trim().slice(0, 2000); return null; },
+      () => { const el = document.querySelector('article div[dir="auto"] span[dir="auto"], [data-testid="post-caption"]'); const t = el ? el.textContent.trim() : ''; return t && !isTimeStamp(t) ? t.slice(0, 2000) : null; },
     ]);
-    if (data.caption) {
-      const m = data.caption.match(/^[\d,.]+\s*(?:likes?|comments?)[\s\S]*?:\s*"([\s\S]*)"\.?\s*$/i);
-      if (m) data.caption = m[1].trim();
-    }
 
     data.likes = findAny([
+      // og:description leads with "58 likes, 3 comments" — authoritative on /p/ posts
+      () => { const m = ogMeta.match(/^([\d.,]+\s*[km]?)\s+likes?\s*,\s*[\d.,]+\s*[km]?\s+comments?/i); return m ? parseCount(m[1]) : null; },
       () => { const el = document.querySelector('a[href*="liked_by"], section a[href*="/liked_by/"]'); return el ? parseCount(el.textContent) : null; },
       () => { const els = document.querySelectorAll('[aria-label]'); for (const el of els) { const m = (el.getAttribute('aria-label') || '').match(/([\d,.]+\s*[km]?)\s*likes?/i); if (m) return parseCount(m[1]); } return null; },
       () => { const m = altBlob.match(/([\d,.]+\s*[km]?)\s*likes?/i); return m ? parseCount(m[1]) : null; },
     ]);
 
     data.commentCount = findAny([
+      () => { const m = ogMeta.match(/^[\d.,]+\s*[km]?\s+likes?\s*,\s*([\d.,]+\s*[km]?)\s+comments?/i); return m ? parseCount(m[1]) : null; },
+      () => { for (const el of document.querySelectorAll('span, a, button')) { const t = (el.textContent || '').trim(); if (/^[\d.,]+\s+comments?$/i.test(t)) return parseCount(t); } return null; },
       () => { const els = document.querySelectorAll('article a, article button, article span'); for (const el of els) { const m = el.textContent.match(/([\d,.]+\s*[km]?)\s*comments?/i); if (m) return parseCount(m[1]); } return null; },
       () => { const m = altBlob.match(/([\d,.]+\s*[km]?)\s*comments?/i); return m ? parseCount(m[1]) : null; },
     ]);
