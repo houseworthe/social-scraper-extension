@@ -9,18 +9,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.action.setBadgeText({ text: '' });
   }
 
-  // Permalink fallback helpers: open the /p/{code}/ page in an inactive tab,
-  // and close it when the permalink worker is done.
-  if (msg.type === 'OPEN_TAB') {
-    if (!/^https:\/\/www\.instagram\.com\/p\/[A-Za-z0-9_-]+\/?(\?|#|$)/.test(msg.url)) {
-      return; // only IG permalinks
-    }
-    chrome.tabs.create({ url: msg.url, active: true });
-  }
-  if (msg.type === 'CLOSE_TAB' && sender.tab) {
-    chrome.tabs.remove(sender.tab.id).catch(() => { });
-  }
-
   // Relay fetch requests from content scripts (which can't do cross-origin).
   // Locked to a fixed allowlist so this can't be used as an open fetch proxy
   // if a content-script context is ever compromised (e.g. XSS on the host page).

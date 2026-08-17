@@ -1,17 +1,14 @@
-// content-ig.js — Instagram post scraper v4
+// content-ig.js — Instagram post scraper v4.2 (logged-in only)
 // Comments strategy (in order):
 //   1. CAPTURE-FIRST: grab whatever comment UI the user already opened
 //      (user clicks IG's comment button, then clicks Scrape Post)
-//   2. Auto-click the Comment button once and re-extract (works logged in)
-//   3. Permalink fallback: /p/{code}/ renders comments in the DOM even logged
-//      out (verified live). A background tab hydrates them, clicks "Load more
-//      comments", and hands the list back via chrome.storage.
+//   2. Auto-click the Comment button once and re-extract
 
 (function () {
   'use strict';
 
   const API_BASE = 'https://staging.label-dex.com';
-  console.log('[LD Scraper] content-ig v4 loaded on', location.pathname);
+  console.log('[LD Scraper] content-ig v4.2 loaded on', location.pathname);
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const storageGet = (keys) => new Promise(r => chrome.storage.local.get(keys, r));
 
@@ -136,35 +133,6 @@
     return username ? `${username}: ${text}` : text;
   }
 
-  function divCommentUnits() {
-    // Logged-out /p/ variant: no ul/li roles at all — comments are plain
-    // sibling DIVs, each holding a profile anchor + text
-    // ("user 3d comment text Like Reply"). Find the container whose children
-    // are mostly comment-like DIVs and return those children.
-    const anchors = [...document.querySelectorAll('a[href^="/"]')]
-      .filter(a => /^\/([A-Za-z0-9._]+)\/?$/.test(a.getAttribute('href') || ''));
-    const candidates = [];
-    for (const a of anchors) {
-      let el = a;
-      for (let depth = 0; depth < 6 && el.parentElement; depth++) {
-        el = el.parentElement;
-        const parent = el.parentElement;
-        if (!parent) break;
-        const kids = [...parent.children];
-        if (kids.length < 3) continue;
-        const anchored = kids.filter(k => k.querySelector('a[href^="/"]'));
-        if (anchored.length >= Math.max(3, Math.ceil(kids.length * 0.6))) {
-          candidates.push(kids);
-        }
-      }
-    }
-    let best = null;
-    for (const set of candidates) {
-      if (!best || set.length > best.length) best = set;
-    }
-    return best || [];
-  }
-
   function commentUnits() {
     // Roots in priority order: an open comment dialog (Reels sheet / modal,
     // i.e. the user already clicked comments), the article comment list
@@ -186,12 +154,6 @@
       }
       if (all.length) return all;
     }
-    // Strategy 3: plain-DIV comment layout (logged-out /p/ variant)
-    for (const u of divCommentUnits()) {
-      if (!u.querySelector('a[href^="/"]')) continue;
-      const c = extractFromUnit(u);
-      if (c) all.push(c);
-    }
     return all;
   }
 
@@ -211,75 +173,6 @@
     }
     return out;
   }
-
-  // Permalink fallback: /p/{code}/ hydrates comments client-side even when
-  // logged out (verified on the live DOM). The background tab does the work
-  // and posts the result to chrome.storage; we poll for it.
-  async function scrapeViaPermalink(code) {
-    const reqId = 'perm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    try {
-      await chrome.storage.local.set({ pendingPermalink: { reqId, code, startedAt: Date.now() } });
-      chrome.runtime.sendMessage({ type: 'OPEN_TAB', url: `https://www.instagram.com/p/${code}/` });
-    } catch (e) {
-      console.log('[LD Scraper] Permalink fallback failed to start', e);
-      return [];
-    }
-    for (let i = 0; i < 90; i++) {
-      await sleep(500);
-      const res = (await storageGet(['permalinkResult'])).permalinkResult;
-      if (res && res.reqId === reqId) {
-        chrome.storage.local.remove('permalinkResult');
-        return res.comments || [];
-      }
-    }
-    return [];
-  }
-
-  // Runs on every IG page; only acts when a scrape is waiting on this code.
-  async function permalinkWorker() {
-    try {
-      const pending = (await storageGet(['pendingPermalink'])).pendingPermalink;
-      if (!pending) return;
-      if (Date.now() - pending.startedAt > 60000) {
-        chrome.storage.local.remove('pendingPermalink');
-        return;
-      }
-      const m = location.pathname.match(/^\/p\/([A-Za-z0-9_-]+)/);
-      if (!m || m[1] !== pending.code) return;
-
-      // Wait for the comment list to hydrate (background tabs throttle timers,
-      // so poll generously). Pass the caption so its echo gets filtered.
-      const meta = document.querySelector('meta[property="og:description"]');
-      let cap = null;
-      if (meta) {
-        cap = meta.content.trim();
-        const m = cap.match(/^[\d,.]+\s*(?:likes?|comments?)[\s\S]*?:\s*"([\s\S]*)"\.?\s*$/i);
-        if (m) cap = m[1].trim();
-      }
-      // Nudge lazy rendering (some hydration waits on scroll/visibility)
-      window.scrollTo(0, 400);
-      let comments = [];
-      for (let i = 0; i < 24 && !comments.length; i++) {
-        await sleep(750);
-        comments = extractComments(cap);
-        if (i % 4 === 3) window.scrollTo(0, 800);
-      }
-      // Pull additional batches (live page: ~14 initial, 24 total)
-      for (let k = 0; k < 3; k++) {
-        const more = [...document.querySelectorAll('button')]
-          .find(b => /load more comments/i.test(textOf(b)));
-        if (!more) break;
-        more.click();
-        await sleep(1800);
-        comments = extractComments(cap);
-      }
-      await chrome.storage.local.set({ permalinkResult: { reqId: pending.reqId, comments } });
-      chrome.runtime.sendMessage({ type: 'CLOSE_TAB' });
-    } catch (e) {
-      console.log('[LD Scraper] Permalink worker error', e);
-    }
-  }
-  permalinkWorker();
 
   // ============ MAIN SCRAPE ============
 
@@ -333,11 +226,11 @@
       () => { const els = document.querySelectorAll('[aria-label]'); for (const el of els) { const m = (el.getAttribute('aria-label') || '').match(/([\d,.]+\s*[km]?)\s*(views|plays)/i); if (m) return parseCount(m[1]); } return null; },
     ]);
 
-    // ===== COMMENTS (text), 3 layers =====
+    // ===== COMMENTS (text), 2 layers =====
     // Layer 1: capture whatever the user already opened (click comments, then Scrape)
     let comments = extractComments(data.caption);
 
-    // Layer 2: auto-open the comment panel once (works when logged in)
+    // Layer 2: auto-open the comment panel once
     if (!comments.length) {
       const commentBtn = [...document.querySelectorAll('button')]
         .find(b => /^Comment\s*\d*/i.test(textOf(b)) || b.querySelector('img[alt="Comment"]'));
@@ -345,12 +238,6 @@
         try { commentBtn.click(); await sleep(2500); } catch (e) { }
         comments = extractComments(data.caption);
       }
-    }
-
-    // Layer 3: permalink fallback (works even logged out)
-    if (!comments.length) {
-      const m = window.location.pathname.match(/\/reels?\/([A-Za-z0-9_-]+)/);
-      if (m) comments = await scrapeViaPermalink(m[1]);
     }
 
     if (comments.length) data.comments = comments;
