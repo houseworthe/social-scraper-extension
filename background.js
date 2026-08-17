@@ -1,4 +1,4 @@
-// background.js — Service worker: badge updates + relay API requests for content scripts
+// background.js — Service worker: badge updates + relay API requests + tab helpers
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'SCRAPED') {
@@ -7,6 +7,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'CLEAR') {
     chrome.action.setBadgeText({ text: '' });
+  }
+
+  // Permalink fallback helpers: open the /p/{code}/ page in an inactive tab,
+  // and close it when the permalink worker is done.
+  if (msg.type === 'OPEN_TAB') {
+    if (!/^https:\/\/www\.instagram\.com\/p\/[A-Za-z0-9_-]+\/?(\?|#|$)/.test(msg.url)) {
+      return; // only IG permalinks
+    }
+    chrome.tabs.create({ url: msg.url, active: true });
+  }
+  if (msg.type === 'CLOSE_TAB' && sender.tab) {
+    chrome.tabs.remove(sender.tab.id).catch(() => { });
   }
 
   // Relay fetch requests from content scripts (which can't do cross-origin).
@@ -46,3 +58,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.action.setBadgeText({ text: '' });
 });
+
+console.log('[LD Scraper] background v4 loaded');
