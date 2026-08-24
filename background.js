@@ -19,6 +19,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const code = String(msg.code || '');
     if (!/^[A-Za-z0-9_-]+$/.test(code)) { sendResponse({ ok: false, err: 'bad code' }); return; }
     const decodeEntities = (s) => String(s)
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ''; } })
+      .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch { return ''; } })
       .replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&#39;/g, "'")
       .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     fetch(`https://www.instagram.com/p/${code}/`, { credentials: 'include' })

@@ -114,6 +114,7 @@
     '^\\d+[smhdwy](\\s*ago)?$',
     '^(liked by .*|liked)$',
     '^(like|unlike|follow|following)$',
+    '^verified$',
     '^(like\s*reply|reply\s*like|likereply)$',
     '^like(reply|comment)?s?$',
     '^[\\d.,]+[km]?\\s*(likes?|replies|views)?$',
@@ -164,6 +165,7 @@
     if (username && text.toLowerCase().startsWith(username.toLowerCase())) {
       text = text.slice(username.length).trim();
     }
+    if (JUNK_TEXT.test(text)) return null; // catches "by X and others" from fallback join
     if (!text || text.length < 2 || text.length > 500) return null;
     // Comments always carry a username on both layouts; no-anchor hits are
     // chrome (action bars, prompts) — drop them.
