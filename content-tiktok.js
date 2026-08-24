@@ -5,6 +5,7 @@
   'use strict';
 
   const API_BASE = 'https://staging.label-dex.com';
+  console.log('[LD Scraper] tiktok content loaded on', location.pathname);
 
   function getCurrentTrackId() {
     return new Promise((resolve) => {
@@ -176,7 +177,7 @@
 
   function injectButton() {
     if (document.getElementById('ld-scraper-btn')) return;
-    const isVideo = /\/video\//.test(window.location.pathname);
+    const isVideo = /\/(video|photo)\//.test(window.location.pathname);
     if (!isVideo) return;
 
     const btn = document.createElement('button');
@@ -197,13 +198,22 @@
       setTimeout(() => { btn.style.background = '#fe2c55'; btn.textContent = '📋 Scrape Post'; btn.disabled = false; }, 2000);
     };
 
-    document.body.appendChild(btn);
+    // documentElement, not body: TikTok re-renders body children on route
+    // changes and can orphan a body-appended button.
+    document.documentElement.appendChild(btn);
   }
+
+  // Self-healing injection: TikTok's re-renders can remove the button at any
+  // time; re-inject whenever it's missing (cheap id check).
+  setInterval(() => {
+    try { injectButton(); } catch (e) { }
+  }, 2000);
 
   let lastUrl = window.location.href;
   const observer = new MutationObserver(() => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
+      console.log('[LD Scraper] SPA nav ->', location.pathname);
       const old = document.getElementById('ld-scraper-btn');
       if (old) old.remove();
       setTimeout(injectButton, 2000);
