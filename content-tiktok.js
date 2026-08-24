@@ -5,7 +5,8 @@
   'use strict';
 
   const API_BASE = 'https://staging.label-dex.com';
-  console.log('[LD Scraper] tiktok content loaded on', location.pathname);
+  const VERSION = '3.4.3'; // shown on the button so stale loads are obvious
+  console.log('[LD Scraper] tiktok content v' + VERSION + ' loaded on', location.pathname);
 
   function getCurrentTrackId() {
     return new Promise((resolve) => {
@@ -182,7 +183,7 @@
 
     const btn = document.createElement('button');
     btn.id = 'ld-scraper-btn';
-    btn.textContent = '📋 Scrape Post';
+    btn.textContent = `📋 Scrape Post v${VERSION}`;
     btn.style.cssText = `position:fixed;bottom:20px;right:20px;z-index:99999;background:#fe2c55;color:white;border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;`;
     btn.onmouseenter = () => (btn.style.background = '#e0244a');
     btn.onmouseleave = () => (btn.style.background = '#fe2c55');
@@ -190,12 +191,19 @@
     btn.onclick = async () => {
       btn.textContent = '⏳ Scraping...';
       btn.disabled = true;
-      const data = await scrapePost();
-      await sendToServer(data);
+      let data;
+      try {
+        data = await scrapePost();
+      } catch (e) {
+        console.log('[LD Scraper] scrape error', e);
+        data = {};
+      }
+      const sent = await sendToServer(data);
       await saveLocal(data);
-      btn.style.background = '#2ecc71';
-      btn.textContent = '✓ Scraped!';
-      setTimeout(() => { btn.style.background = '#fe2c55'; btn.textContent = '📋 Scrape Post'; btn.disabled = false; }, 2000);
+      btn.style.background = sent ? '#2ecc71' : '#e67e22';
+      btn.textContent = sent ? '✓ Sent!' : '⚠ Saved locally (not sent — check token)';
+      console.log('[LD Scraper] result:', JSON.stringify(data, null, 2), '| sent:', sent);
+      setTimeout(() => { btn.style.background = '#fe2c55'; btn.textContent = `📋 Scrape Post v${VERSION}`; btn.disabled = false; }, 3500);
     };
 
     // documentElement, not body: TikTok re-renders body children on route
