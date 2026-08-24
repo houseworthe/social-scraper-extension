@@ -12,6 +12,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Relay fetch requests from content scripts (which can't do cross-origin).
   // Locked to a fixed allowlist so this can't be used as an open fetch proxy
   // if a content-script context is ever compromised (e.g. XSS on the host page).
+  if (msg.type === 'IG_META') {
+    // Fetch the post's server-rendered page (with the user's IG cookies via
+    // host_permissions) and pull og: meta tags. Content scripts can't fetch
+    // instagram.com cross-origin, so they relay through here.
+    const code = String(msg.code || '');
+    if (!/^[A-Za-z0-9_-]+$/.test(code)) { sendResponse({ ok: false, err: 'bad code' }); return; }
+    const decodeEntities = (s) => String(s)
+      .replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    fetch(`https://www.instagram.com/p/${code}/`, { credentials: 'include' })
+      .then(async (resp) => {
+        const html = await resp.text();
+        const pick = (prop) => {
+          const re1 = new RegExp(`<meta[^>]+property="${prop}"[^>]+content="([^"]*)"`, 'i');
+          const re2 = new RegExp(`<meta[^>]+content="([^"]*)"[^>]+property="${prop}"`, 'i');
+          const mm = html.match(re1) || html.match(re2);
+          return mm ? decodeEntities(mm[1]) : null;
+        };
+        sendResponse({ ok: resp.ok, ogDescription: pick('og:description'), ogTitle: pick('og:title') });
+      })
+      .catch((err) => sendResponse({ ok: false, err: String(err) }));
+    return true; // async sendResponse
+  }
+
   if (msg.type === 'API_REQUEST') {
     const ALLOWED_ORIGIN = 'https://staging.label-dex.com';
     const ALLOWED_ENDPOINTS = new Set([

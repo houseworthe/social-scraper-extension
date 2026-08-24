@@ -16,6 +16,21 @@
     return storageGet(['activeTrackId']).then(res => res.activeTrackId || null);
   }
 
+  // Fresh og: meta from the server-rendered page, relayed through the
+  // background service worker (content scripts can't fetch instagram.com).
+  // Critical on SPA navigations (feed -> post modal): the document's og tags
+  // are stale or absent, but the fetched permalink page always carries
+  // "N likes, M comments - user on <date>: \"caption\"".
+  function fetchOgMeta() {
+    const code = (location.pathname.match(/\/(?:p|reel|reels)\/([A-Za-z0-9_-]+)/) || [])[1];
+    if (!code) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ type: 'IG_META', code }, (resp) => resolve(resp && resp.ok ? resp : null));
+      } catch (e) { resolve(null); }
+    });
+  }
+
   async function sendToServer(data) {
     const token = (await storageGet(['scraperToken'])).scraperToken || '';
     const trackId = await getCurrentTrackId();
@@ -79,9 +94,12 @@
     return null;
   }
 
-  // "3 days ago", "3d", "19h" — timestamps, never captions
+  // "3 days ago", "3d", "19h", "3w", "Aug 2", "August 2, 2026" — timestamps/date
+  // labels, never captions
+  const MONTHS = 'jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec';
   const isTimeStamp = (t) => /^[\d.,]+\s*(s|m|h|d|w|y)(ago)?$/i.test((t || '').trim()) ||
-    /^[\d.,]+\s+(second|minute|hour|day|week|month|year)s?\s+ago$/i.test((t || '').trim());
+    /^[\d.,]+\s+(second|minute|hour|day|week|month|year)s?\s+ago$/i.test((t || '').trim()) ||
+    new RegExp(`^(${MONTHS})[a-z]*\.?\s+\d{1,2}(,\s*\d{4})?$`, 'i').test((t || '').trim());
 
   // ============ COMMENTS ============
 
@@ -101,7 +119,19 @@
     '^[\\d.,]+[km]?\\s*(likes?|replies|views)?$',
     '^(log in to like or comment.*|log in to (or|like|reply|post).*|sign up|log in)$',
     '^like\d*comment\d*share?.*$',
+    '^by\s+\S+.*\s+and\s+(others|\d+\s+others)$',
   ].join('|'), 'i');
+
+  // New-IG action bar: one row of buttons whose concatenated text reads like
+  // "Like179Comment20Share" (counts inline, no words). Returns the squashed
+  // text of the real action bar, or null.
+  function actionBarText() {
+    for (const b of document.querySelectorAll('button, [role="button"]')) {
+      const t = (b.textContent || '').replace(/\s+/g, '');
+      if (/^Like[\d.,]*[kmKM]?Comment\d+/i.test(t)) return t;
+    }
+    return null;
+  }
 
   function extractFromUnit(unit) {
     // Username: first profile-style anchor (/username/, not /p/ /reel/ /explore/...)
@@ -145,8 +175,12 @@
     // Roots in priority order: an open comment dialog (Reels sheet / modal,
     // i.e. the user already clicked comments), the article comment list
     // (permalink page), then the whole document.
+    // Login nag renders as role=dialog with zero comment content — only trust a
+    // dialog that actually holds profile anchors (open comments sheet/modal).
+    const dlg = document.querySelector('div[role="dialog"]');
+    const dlgOk = dlg && dlg.querySelector('a[href^="/"]:not([href^="/p/"]):not([href^="/reel"])');
     const roots = [
-      document.querySelector('div[role="dialog"]'),
+      dlgOk ? dlg : null,
       document.querySelector('article ul, ul[aria-label="Comments"], div[aria-label="Comments"]'),
       document,
     ].filter(Boolean);
@@ -251,17 +285,22 @@
       scrapedAt: new Date().toISOString(),
     };
 
-    const altBlob = document.querySelector('meta[property="og:description"]')?.content
-      || document.querySelector('h1')?.textContent || '';
+    // Fresh og: meta from the server-rendered permalink (background relay).
+    // Beats stale document meta on SPA navigations (feed -> modal).
+    const ogFresh = await fetchOgMeta();
+    const ogMeta = (ogFresh && ogFresh.ogDescription)
+      || document.querySelector('meta[property="og:description"]')?.content || '';
+
+    const altBlob = ogMeta || document.querySelector('h1')?.textContent || '';
+    const actionBar = actionBarText();
 
     data.username = findAny([
+      () => { const m = ogMeta.match(/-\s*([A-Za-z0-9._]+)\s+on\s+/); return m ? m[1] : null; },
       () => { const a = document.querySelector('article header a, section main header a'); if (a) { const m = (a.getAttribute('href') || '').match(/^\/([^/]+)/); return m ? m[1] : null; } },
       () => { const el = document.querySelector('article header a span, header a[href*="/"] span'); return el ? el.textContent.trim() : null; },
       () => { const links = document.querySelectorAll('a[href^="/"]'); for (const l of links) { const m = (l.getAttribute('href') || '').match(/^\/([a-z0-9._]+)\/(p|reel|reels)\//i); if (m) return m[1]; } return null; },
       () => { const meta = document.querySelector('meta[property="og:title"]'); if (meta) { const m = meta.content.match(/@([a-z0-9._]+)/i); if (m) return m[1]; } return null; },
     ]);
-
-    const ogMeta = document.querySelector('meta[property="og:description"]')?.content || '';
 
     data.caption = findAny([
       // og:description carries the full caption in quotes — most reliable on /p/ photo posts
@@ -273,6 +312,8 @@
     data.likes = findAny([
       // og:description leads with "58 likes, 3 comments" — authoritative on /p/ posts
       () => { const m = ogMeta.match(/^([\d.,]+\s*[km]?)\s+likes?\s*,\s*[\d.,]+\s*[km]?\s+comments?/i); return m ? parseCount(m[1]) : null; },
+      // New-IG action bar: "Like179Comment20Share" squashed text
+      () => { const m = (actionBar || '').match(/^Like([\d.,]*[kmKM]?)Comment/i); return m && m[1] ? parseCount(m[1]) : null; },
       () => { const el = document.querySelector('a[href*="liked_by"], section a[href*="/liked_by/"]'); return el ? parseCount(el.textContent) : null; },
       () => { const els = document.querySelectorAll('[aria-label]'); for (const el of els) { const m = (el.getAttribute('aria-label') || '').match(/([\d,.]+\s*[km]?)\s*likes?/i); if (m) return parseCount(m[1]); } return null; },
       () => { const m = altBlob.match(/([\d,.]+\s*[km]?)\s*likes?/i); return m ? parseCount(m[1]) : null; },
@@ -280,6 +321,7 @@
 
     data.commentCount = findAny([
       () => { const m = ogMeta.match(/^[\d.,]+\s*[km]?\s+likes?\s*,\s*([\d.,]+\s*[km]?)\s+comments?/i); return m ? parseCount(m[1]) : null; },
+      () => { const m = (actionBar || '').match(/Comment([\d.,]+\s*[kmKM]?)/i); return m ? parseCount(m[1]) : null; },
       () => { for (const el of document.querySelectorAll('span, a, button')) { const t = (el.textContent || '').trim(); if (/^[\d.,]+\s+comments?$/i.test(t)) return parseCount(t); } return null; },
       () => { const els = document.querySelectorAll('article a, article button, article span'); for (const el of els) { const m = el.textContent.match(/([\d,.]+\s*[km]?)\s*comments?/i); if (m) return parseCount(m[1]); } return null; },
       () => { const m = altBlob.match(/([\d,.]+\s*[km]?)\s*comments?/i); return m ? parseCount(m[1]) : null; },
