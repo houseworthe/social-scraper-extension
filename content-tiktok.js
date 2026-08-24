@@ -5,7 +5,7 @@
   'use strict';
 
   const API_BASE = 'https://staging.label-dex.com';
-  const VERSION = '3.4.3'; // shown on the button so stale loads are obvious
+  const VERSION = '3.4.4'; // shown on the button so stale loads are obvious
   console.log('[LD Scraper] tiktok content v' + VERSION + ' loaded on', location.pathname);
 
   function getCurrentTrackId() {
@@ -115,9 +115,20 @@
   async function scrapePost() {
     await new Promise(r => setTimeout(r, 2000));
 
+    // Real post URL: in logged-in modal views the address bar stays on the
+    // profile/feed URL, so prefer an in-page anchor to the actual post.
+    const postUrl = (() => {
+      if (/\/(video|photo)\//.test(window.location.pathname)) return window.location.href.split('?')[0];
+      const a = document.querySelector('a[href*="/photo/"], a[href*="/video/"]');
+      if (a) {
+        try { return new URL(a.getAttribute('href'), location.origin).pathname; } catch (e) { }
+      }
+      return window.location.href;
+    })();
+
     const data = {
       platform: 'TikTok',
-      url: window.location.href,
+      url: postUrl,
       scrapedAt: new Date().toISOString(),
     };
 
@@ -178,13 +189,18 @@
 
   function injectButton() {
     if (document.getElementById('ld-scraper-btn')) return;
-    const isVideo = /\/(video|photo)\//.test(window.location.pathname);
-    if (!isVideo) return;
+    // Inject wherever a post's action rail exists — path-based checks miss
+    // photo carousels opened as profile/feed modals (URL stays /@user).
+    const onPostPath = /\/(video|photo)\//.test(window.location.pathname);
+    const hasPostUI =
+      !!document.querySelector('[data-e2e="like-count"], [data-e2e="browse-like-count"]') &&
+      !!document.querySelector('[data-e2e="comment-count"], [data-e2e="browse-comment-count"]');
+    if (!onPostPath && !hasPostUI) return;
 
     const btn = document.createElement('button');
     btn.id = 'ld-scraper-btn';
     btn.textContent = `📋 Scrape Post v${VERSION}`;
-    btn.style.cssText = `position:fixed;bottom:20px;right:20px;z-index:99999;background:#fe2c55;color:white;border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;`;
+    btn.style.cssText = `position:fixed;bottom:20px;right:20px;z-index:2147483645;background:#fe2c55;color:white;border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;`;
     btn.onmouseenter = () => (btn.style.background = '#e0244a');
     btn.onmouseleave = () => (btn.style.background = '#fe2c55');
 
