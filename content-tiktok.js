@@ -5,7 +5,7 @@
   'use strict';
 
   const API_BASE = 'https://staging.label-dex.com';
-  const VERSION = '3.4.4'; // shown on the button so stale loads are obvious
+  const VERSION = '3.4.5'; // shown on the button so stale loads are obvious
   console.log('[LD Scraper] tiktok content v' + VERSION + ' loaded on', location.pathname);
 
   function getCurrentTrackId() {
@@ -121,7 +121,7 @@
       if (/\/(video|photo)\//.test(window.location.pathname)) return window.location.href.split('?')[0];
       const a = document.querySelector('a[href*="/photo/"], a[href*="/video/"]');
       if (a) {
-        try { return new URL(a.getAttribute('href'), location.origin).pathname; } catch (e) { }
+        try { return new URL(a.getAttribute('href'), location.origin).href; } catch (e) { }
       }
       return window.location.href;
     })();
